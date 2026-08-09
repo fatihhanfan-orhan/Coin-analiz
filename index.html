@@ -6,14 +6,13 @@
 <meta name="theme-color" content="#08111f" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-<link rel="manifest" href="/manifest.webmanifest?v=420" />
-<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png?v=32">
-<link rel="apple-touch-icon" href="/icons/icon-192.png?v=32">
+<link rel="manifest" href="./manifest.webmanifest?v=450" />
+<link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png?v=450">
+<link rel="apple-touch-icon" href="./icons/icon-192.png?v=450">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 
-<link rel="icon" href="icons/icon-192.png?v=31" />
 <title>Coin Analiz</title>
 <style>
 :root{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#eef3fb;background:#08111f}
@@ -47,9 +46,9 @@
 </head>
 <body><div class="wrap">
 <div class="card header">
-  <div class="title"><img src="icons/icon-192.png?v=31" alt=""><div><h1>COIN <span class="accent">ANALİZ</span></h1><div class="sub">3'lü Day Trade Değerlendirme Paneli • 15 dk giriş + 1 saat trend teyidi • v4.3 • YAPI: 4.3-MANUEL</div></div></div>
+  <div class="title"><img src="./icons/icon-192.png?v=450" alt=""><div><h1>COIN <span class="accent">ANALİZ</span></h1><div class="sub">3'lü Day Trade Değerlendirme Paneli • 15 dk giriş + 1 saat trend teyidi • v4.6 • YAPI: 4.5-TUTARLI</div></div></div>
 </div>
-<div class="card finder"><button id="find3" class="finderBtn">🎯 DESTEĞE EN YAKIN 3 FIRSATI BUL</button><div id="scanStatus" class="scanstatus">Binance TR TRY piyasasını tarar; BTC ve ETH hariç, Direnç-1'e en az %3 kâr alanı bulunan, desteğe en fazla %3 uzak ve hedefe hızlı ulaşma ihtimali güçlü 3 day-trade fırsatını seçer.</div><div id="candidateGrid" class="candidateGrid"></div><div class="method">FIRSAT PUANI ≠ AL PUANI. Ön eleme: kâr alanı ≥ %3, desteğe uzaklık ≤ %3, uygun likidite/spread. Puan: %35 kâr marjı + %25 hedefe ulaşma + %20 destek/dönüş + %15 hacim/momentum + %5 likidite/spread. BTC/ETH hariç.</div></div>
+<div class="card finder"><button id="find3" class="finderBtn">🎯 DESTEĞE EN YAKIN 3 FIRSATI BUL</button><div id="scanStatus" class="scanstatus">Binance TR TRY piyasasını tarar; BTC ve ETH hariç, Direnç-1'e en az %3 kâr alanı bulunan, desteğe en fazla %3 uzak ve hedefe hızlı ulaşma ihtimali güçlü 3 day-trade fırsatını seçer.</div><div id="candidateGrid" class="candidateGrid"></div><div class="method">FIRSAT PUANI ≠ AL PUANI. Ön eleme: gerçek Direnç-1 kâr alanı ≥ %3, desteğe uzaklık ≤ %3, risk/kazanç ≥ 1:1.30 ve uygun likidite/spread. Puan: %35 kâr marjı + %25 hedefe ulaşma + %20 destek/dönüş + %15 hacim/momentum + %5 likidite/spread. BTC/ETH hariç.</div></div>
 <div class="controls">
 <input id="c1" value="BANK" placeholder="Coin 1" autocomplete="off" />
 <input id="c2" value="HEI" placeholder="Coin 2" autocomplete="off" />
@@ -110,19 +109,28 @@ function tradePlan(k15,k1h,m,h){
  const s15=clusteredLevel(lows15,price,'below'), s1=clusteredLevel(lows1,price,'below',.7);
  const supports=[s15,s1,m.bollDn,m.ema21,h.ema21].filter(Number.isFinite).filter(x=>x<=price*1.015);
  let support=supports.length?supports.sort((a,b)=>Math.abs(price-a)-Math.abs(price-b))[0]:price-A;
- // Build a practical zone around support; not a single magic price.
  const pad=Math.max(A*.22,support*.0015);
  const zoneLow=Math.max(0,support-pad), zoneHigh=support+pad;
  const dist=(price-zoneHigh)/price*100;
  const near=price>=zoneLow-A*.15 && price<=zoneHigh+A*.35;
- const bounce=near && m.price>m.ema9 && m.hist>m.prevHist && m.vol>=m.vma5*.9;
+
+ // V4.6: “teyitli giriş” tek bir zayıf işarete değil, birlikte çalışan koşullara bağlıdır.
+ const volOk=Number.isFinite(m.vma5) && m.vma5>0 && m.vol>=m.vma5;
+ const rsiOk=m.rsi>=42 && m.rsi<=68;
+ const emaOk=m.ema9>=m.ema21 && m.price>=m.ema9;
+ const macdOk=m.macd>=m.signal && m.hist>m.prevHist;
+ const hourlyOk=h.ema9>=h.ema21 || h.hist>h.prevHist;
+ const bounce=near && volOk && rsiOk && (emaOk||macdOk) && hourlyOk;
+
  const stop=Math.max(0,zoneLow-Math.max(A*.65,support*.0035));
- let resist=[...highs15,...highs1,m.bollUp].filter(Number.isFinite).filter(x=>x>Math.max(price,zoneHigh)*1.002).sort((a,b)=>a-b);
- let t1=resist[0]||Math.max(price,zoneHigh)+2*(Math.max(price,zoneHigh)-stop);
- let t2=resist.find(x=>x>t1*1.006)||Math.max(t1*1.012,Math.max(price,zoneHigh)+3*(Math.max(price,zoneHigh)-stop));
- const entry=(zoneLow+zoneHigh)/2, risk=Math.max(entry-stop,entry*.001), rr=(t1-entry)/risk;
- const status=bounce?'TEYİTLİ GİRİŞ':(near?'DESTEKTE — TEYİT BEKLE':dist>0?'DESTEĞE GERİ ÇEKİLME BEKLE':'DESTEK ALTI — ALMA');
- return{support,zoneLow,zoneHigh,dist,near,bounce,stop,t1,t2,rr,status};
+ const resist=[...highs15,...highs1,m.bollUp].filter(Number.isFinite).filter(x=>x>Math.max(price,zoneHigh)*1.002).sort((a,b)=>a-b);
+ const hasResistance=resist.length>0;
+ const t1=hasResistance?resist[0]:Math.max(price,zoneHigh)+2*(Math.max(price,zoneHigh)-stop);
+ const t2=resist.find(x=>x>t1*1.006)||Math.max(t1*1.012,Math.max(price,zoneHigh)+3*(Math.max(price,zoneHigh)-stop));
+ const entry=near?price:(zoneLow+zoneHigh)/2;
+ const risk=Math.max(entry-stop,entry*.001), rr=(t1-entry)/risk;
+ const status=bounce?'TEYİTLİ GİRİŞ':(near?'DESTEKTE — TEYİT BEKLE':dist>0?'DESTEĞE GERİ ÇEKİLME BEKLE':'DESTEK ALTI — GİRİŞ YAPMA');
+ return{support,zoneLow,zoneHigh,dist,near,bounce,volOk,rsiOk,emaOk,macdOk,hourlyOk,stop,t1,t2,rr,hasResistance,status};
 }
 
 function score(m,h,p){let buy=0,sell=0;const add=(good,w=1,neutral=false)=>{if(good)buy+=w;else if(!neutral)sell+=w};
@@ -132,10 +140,14 @@ function score(m,h,p){let buy=0,sell=0;const add=(good,w=1,neutral=false)=>{if(g
  const max=11.5;let b=Math.round(Math.min(10,buy/max*10)*10)/10;
  if(p && !p.near && p.dist>2.5)b=Math.min(b,6.4);
  if(p && p.status.includes('DESTEK ALTI'))b=Math.min(b,4.9);
+ // V4.6: dönüş teyidi yoksa sistem kesinlikle “AL” üretemez.
+ if(p && !p.bounce)b=Math.min(b,7.4);
+ // Gerçek ilk direnç bulunamadıysa otomatik güveni sınırla.
+ if(p && !p.hasResistance)b=Math.min(b,6.9);
  return{buy:b,sell:Math.round(Math.min(10,sell/max*10)*10)/10}}
 function cls(v){return v>=7.5?'good':v>=5?'mid':'bad'}
 function label(v){return v>=7.5?'AL':v>=5?'BEKLE':'ZAYIF'}
-function decisionText(s){return s.buy>=7.5?'🟢 AL':s.buy>=5?'🟡 BEKLE':'🔴 ALMA / SAT'}
+function decisionText(s){return s.buy>=7.5?'🟢 AL':s.buy>=5?'🟡 BEKLE':'🔴 GİRİŞ YAPMA'}
 function reasonRows(m,h,s){
  const rows=[];
  const add=(ok,good,bad)=>rows.push(`<div class="whyrow"><span class="whyicon">${ok?'✅':'⚠️'}</span><span>${ok?good:bad}</span></div>`);
@@ -167,12 +179,12 @@ async function klines(name,interval){
  let errors=[];
  for(const url of candidates){
    try{
-    const r=await fetch(url,{cache:'no-store'}); const text=await r.text();
+    const r=await fetchWithTimeout(url,{cache:'no-store'},9000); const text=await r.text();
     if(!r.ok){errors.push('HTTP '+r.status);continue}
     const j=JSON.parse(text); const raw=Array.isArray(j)?j:j.data; const d=Array.isArray(raw)?closedKlines(raw,interval):[];
     if(d.length>50)return d;
     errors.push(j?.msg||'kapanmış mum verisi yok');
-   }catch(e){errors.push(e.message)}
+   }catch(e){errors.push(e.name==='AbortError'?'zaman aşımı':e.message)}
  }
  throw new Error('Veri alınamadı: '+[...new Set(errors)].join(' | '));
 }
@@ -195,25 +207,21 @@ function planUI(p,m,h){
 function card(name,data,error){if(error)return `<div class="coin badborder"><div class="coin-title">${name}/TRY</div><div class="err">${error}</div></div>`;const {m,h,s,p}=data, c=cls(s.buy),wid='why_'+name.replace(/[^A-Z0-9]/g,'');return `<div class="coin ${c}border"><div class="coin-head"><div><div class="coin-title">${name}/TRY</div><div class="price">${fmt(m.price,6)}</div><div class="chg ${m.change>=0?'good':'bad'}">${m.change>=0?'+':''}${fmt(m.change,2)}%</div></div><div class="sub">15 dk + 1 sa</div></div>${planUI(p,m,h)}<div class="decision ${c}">${decisionText(s)}<div class="decisionSub">Destek + teknik gösterge sonucu</div></div><button class="whybtn" onclick="toggleWhy('${wid}')">❓ NEDEN?</button><div class="why" id="${wid}">${reasonRows(m,h,s)}<div class="whyrow"><span class="whyicon">🎯</span><span>${p.status}. Destek bölgesi ${fmt(p.zoneLow,6)}–${fmt(p.zoneHigh,6)}.</span></div></div><div class="scores"><div class="scorebox"><div class="scorelabel">ALIM PUANI</div><div class="score ${c}">${s.buy}/10</div></div><div class="scorebox"><div class="scorelabel">SATIŞ/ÇIKIŞ</div><div class="score ${cls(s.sell)}">${s.sell}/10</div></div></div><div class="section"><h3>15 DAKİKA — GİRİŞ <span class="closedtag">KAPANMIŞ MUM</span></h3><div class="metrics">${metric('VOL',fmt(m.vol,2))}${metric('VOL MA5',fmt(m.vma5,2))}${metric('VOL MA10',fmt(m.vma10,2))}${metric('EMA 9/21',fmt(m.ema9)+' / '+fmt(m.ema21))}${metric('RSI 14',fmt(m.rsi,1))}${metric('MACD Hist',fmt(m.hist,5))}${metric('BOLL DN',fmt(m.bollDn))}${metric('BOLL MB',fmt(m.bollMid))}</div></div><div class="section"><h3>1 SAAT — TREND TEYİDİ <span class="closedtag">KAPANMIŞ MUM</span></h3><div class="metrics">${metric('EMA 9',fmt(h.ema9))}${metric('EMA 21',fmt(h.ema21))}${metric('RSI 14',fmt(h.rsi,1))}${metric('MACD Hist',fmt(h.hist,5))}</div></div></div>`}
 
 function entryGuide(p,m,h){
-  const price = Number(m?.price||0);
-  const lo = Number(p?.zoneLow||p?.supportLow||p?.supportLo||0);
-  const hi = Number(p?.zoneHigh||p?.supportHigh||p?.supportHi||0);
-  const dist = Number(p?.dist ?? p?.distancePct ?? p?.distPct ?? (hi>0 ? ((price-hi)/hi*100) : 999));
-  const volOk = (Number(m?.vma5||0)>0 ? Number(m?.vol||0)/Number(m?.vma5) : 0) >= 1.15;
-  const rsi = Number(m?.rsi||50);
-  const emaOk = Number(m?.ema9||0) >= Number(m?.ema21||0);
-  const macdOk = Number(m?.macdHist ?? m?.hist ?? 0) >= 0;
-  const momentumOk = (rsi>=42 && rsi<=68) && (emaOk || macdOk);
-  if(lo && hi && price>=lo && price<=hi && volOk && momentumOk){
-    return {cls:'egGreen',title:'🟢 ALIM İÇİN UYGUN',sub:'Fiyat destek bölgesinde; hacim ve dönüş göstergeleri teyit veriyor.'};
+  const price=Number(m?.price||0);
+  const lo=Number(p?.zoneLow||0), hi=Number(p?.zoneHigh||0);
+  if(p?.bounce){
+    return {cls:'egGreen',title:'🟢 ALIM İÇİN UYGUN',sub:'Fiyat destek bölgesinde; hacim, RSI, EMA/MACD ve 1 saat teyidi birlikte olumlu.'};
   }
-  if(lo && hi && (price>=lo*0.995 && price<=hi*1.015)){
-    return {cls:'egYellow',title:'🟡 TEYİT BEKLE',sub:'Fiyat ideal giriş bölgesine yakın. 15 dk kapanışında hacim + RSI + EMA/MACD dönüş teyidi bekleniyor.'};
+  if(lo&&hi&&(price>=lo*0.995&&price<=hi*1.015)){
+    const missing=[];
+    if(!p?.volOk)missing.push('hacim'); if(!p?.rsiOk)missing.push('RSI');
+    if(!(p?.emaOk||p?.macdOk))missing.push('EMA/MACD dönüşü'); if(!p?.hourlyOk)missing.push('1 saat trendi');
+    return {cls:'egYellow',title:'🟡 TEYİT BEKLE',sub:`Fiyat giriş bölgesine yakın; ${missing.length?missing.join(', ')+' teyidi eksik':'15 dk kapanış teyidi bekleniyor'}.`};
   }
-  if(hi && price>hi*1.015){
+  if(hi&&price>hi*1.015){
     return {cls:'egRed',title:'🔴 GİRİŞ YAPMA',sub:'Fiyat destekten uzak. Fiyatı kovalamak yerine destek/ideal giriş bölgesine geri çekilmeyi bekle.'};
   }
-  return {cls:'egYellow',title:'🟡 TEYİT BEKLE',sub:'Destek davranışı ve 15 dk dönüş teyidi netleşmeden giriş yapma.'};
+  return {cls:'egYellow',title:'🟡 TEYİT BEKLE',sub:'Destek davranışı ve dönüş teyidi netleşmeden giriş yapma.'};
 }
 function entryGuideHTML(p,m,h){
   const e=entryGuide(p,m,h);
@@ -224,7 +232,13 @@ function entryGuideHTML(p,m,h){
 
 async function analyze(name){const [a,b]=await Promise.all([klines(name,'15m'),klines(name,'1h')]);const m=calc(a),h=calc(b),p=tradePlan(a,b,m,h);return{m,h,p,s:score(m,h,p)}}
 
-async function fetchJsonAny(urls){let errs=[];for(const u of urls){try{const r=await fetch(u,{cache:'no-store'});if(!r.ok){errs.push('HTTP '+r.status);continue}return await r.json()}catch(e){errs.push(e.message)}}throw new Error([...new Set(errs)].join(' | '))}
+async function fetchWithTimeout(url,options={},timeoutMs=9000){
+ const ctrl=new AbortController();
+ const timer=setTimeout(()=>ctrl.abort(),timeoutMs);
+ try{return await fetch(url,{...options,signal:ctrl.signal})}
+ finally{clearTimeout(timer)}
+}
+async function fetchJsonAny(urls){let errs=[];for(const u of urls){try{const r=await fetchWithTimeout(u,{cache:'no-store'},9000);if(!r.ok){errs.push('HTTP '+r.status);continue}return await r.json()}catch(e){errs.push(e.name==='AbortError'?'zaman aşımı':e.message)}}throw new Error([...new Set(errs)].join(' | '))}
 function unwrapArray(j){if(Array.isArray(j))return j;if(Array.isArray(j?.data))return j.data;if(Array.isArray(j?.data?.list))return j.data.list;return []}
 async function all24hTickers(){const j=await fetchJsonAny(['https://api.binance.me/api/v3/ticker/24hr','https://cloudme-tr.2meta.app/api/v1/ticker/24hr']);return unwrapArray(j)}
 async function allBookTickers(){try{return unwrapArray(await fetchJsonAny(['https://api.binance.me/api/v3/ticker/bookTicker','https://cloudme-tr.2meta.app/api/v1/ticker/bookTicker']))}catch{return []}}
@@ -235,7 +249,7 @@ function volatility15(k){const a=k.slice(-16);if(a.length<5)return 0;return a.sl
 
 function resistancePotential(x){
   const p=x.p||{}, m=x.m||{}, h=x.h||{};
-  const entry=Math.max(Number(p.zoneHigh||0), Number(m.price||0));
+  const entry=p.near?Number(m.price||0):Math.max(Number(p.zoneHigh||0),Number(m.price||0));
   const t1=Number(p.t1||0), t2=Number(p.t2||0);
   const upside1=(entry>0&&t1>entry)?((t1-entry)/entry*100):0;
   const upside2=(entry>0&&t2>entry)?((t2-entry)/entry*100):0;
@@ -243,51 +257,28 @@ function resistancePotential(x){
   const v=Math.max(0,Math.min(2.5,Number(x.vRatio||0)));
   const trend=(m.ema9>m.ema21?1:0)+(h.ema9>h.ema21?1:0)+(m.macd>m.signal?1:0)+(m.hist>m.prevHist?1:0);
   const rsi=Number(m.rsi||50);
-  const dist=Math.abs(Number(p.dist||99));
+  const signedDist=Number(p.dist??99), dist=Math.abs(signedDist);
 
-  // Kâr marjı puanı: şartları geçenlerde yüksek yüzdeye daha güçlü öncelik.
   let profitScore=0;
-  if(upside1<3) profitScore=0;
-  else if(upside1<4) profitScore=4;
-  else if(upside1<5) profitScore=5.5;
-  else if(upside1<7) profitScore=7.5;
-  else if(upside1<10) profitScore=9;
-  else if(upside1<15) profitScore=10;
-  else profitScore=9.5;
+  if(upside1<3)profitScore=0; else if(upside1<4)profitScore=4; else if(upside1<5)profitScore=5.5;
+  else if(upside1<7)profitScore=7.5; else if(upside1<10)profitScore=9; else if(upside1<15)profitScore=10; else profitScore=9.5;
 
-  // Hedefe ulaşma olasılığı.
-  let reach=0;
-  reach += (trend/4)*4;
-  reach += (Math.min(v,1.8)/1.8)*2.5;
-  if(rsi>=45&&rsi<=67) reach+=1.5;
-  else if(rsi>=38&&rsi<45) reach+=0.8;
-  else if(rsi>72) reach-=1;
-  if(p.bounce) reach+=2;
-  reach=Math.max(0,Math.min(10,reach));
+  let reach=0; reach+=(trend/4)*4; reach+=(Math.min(v,1.8)/1.8)*2.5;
+  if(rsi>=45&&rsi<=67)reach+=1.5; else if(rsi>=38&&rsi<45)reach+=.8; else if(rsi>72)reach-=1;
+  if(p.bounce)reach+=2; reach=Math.max(0,Math.min(10,reach));
 
-  // Destek/dönüş kalitesi
-  let support=Math.max(0,10-dist*2.2);
-  if(p.bounce) support=Math.min(10,support+2);
-
-  // Hacim/momentum
+  let support=Math.max(0,10-dist*2.2); if(p.bounce)support=Math.min(10,support+2);
   const momentum=Math.max(0,Math.min(10,(Math.min(v,2)/2)*5+(trend/4)*5));
+  const sp=Number(x.spread??99), liquidity=sp<=.10?10:sp<=.18?8:sp<=.30?5:sp<=.50?2:0;
+  const potScore=profitScore*.35+reach*.25+support*.20+momentum*.15+liquidity*.05;
 
-  // Likidite/spread
-  const sp=Number(x.spread||99);
-  const liquidity=sp<=.10?10:sp<=.18?8:sp<=.30?5:sp<=.50?2:0;
-
-  // V4.0: %35 kâr + %25 ulaşma + %20 destek/dönüş + %15 momentum + %5 likidite
-  const score=profitScore*.35+reach*.25+support*.20+momentum*.15+liquidity*.05;
-
-  const eligible = upside1>=3 && dist<=3 && sp<=0.35;
-  return {
-    score:Math.round(score*10)/10,
-    upside1,upside2,rr,t1,t2,profitScore,reach,dist,eligible
-  };
+  // Otomatik liste: gerçek direnç, makul risk/kazanç ve sağlam spread zorunlu.
+  const eligible=!!p.hasResistance && upside1>=3 && signedDist>=0 && signedDist<=3 && rr>=1.30 && sp<=0.35 && !String(p.status||'').includes('DESTEK ALTI');
+  return{score:Math.round(potScore*10)/10,upside1,upside2,rr,t1,t2,profitScore,reach,dist,signedDist,eligible};
 }
 function potentialClass(v){return v>=7.5?'potgood':v>=5?'potmid':'potbad'}
 
-async function candidateMetrics(name,t24,bookMap){const [a,b]=await Promise.all([klines(name,'15m'),klines(name,'1h')]);const m=calc(a),h=calc(b);const qv=num(t24,'quoteVolume','q','volumeQuote','quoteAssetVolume');const ch=num(t24,'priceChangePercent','P')||((num(t24,'lastPrice','c')/(num(t24,'openPrice','o')||1)-1)*100);const bk=bookMap.get(name+'TRY')||bookMap.get(name+'_TRY')||{};const bid=num(bk,'bidPrice','b'),ask=num(bk,'askPrice','a'),mid=(bid+ask)/2,spread=(bid&&ask&&mid)?((ask-bid)/mid*100):0.25;const vRatio=m.vma5?m.vol/m.vma5:0,impulse=m.vma10?m.vma5/m.vma10:0,vola=volatility15(a);const trend=(m.ema9>m.ema21?1:0)+(h.ema9>h.ema21?1:0)+(m.macd>m.signal?1:0)+(m.hist>m.prevHist?1:0),p=tradePlan(a,b,m,h);const out={name,qv,ch,spread,vRatio,impulse,vola,trend,buy:score(m,h,p).buy,m,h,p};out.rpot=resistancePotential(out);return out}
+async function candidateMetrics(name,t24,bookMap){const [a,b]=await Promise.all([klines(name,'15m'),klines(name,'1h')]);const m=calc(a),h=calc(b);const qv=num(t24,'quoteVolume','q','volumeQuote','quoteAssetVolume');const ch=num(t24,'priceChangePercent','P')||((num(t24,'lastPrice','c')/(num(t24,'openPrice','o')||1)-1)*100);const bk=bookMap.get(name+'TRY')||bookMap.get(name+'_TRY')||{};const bid=num(bk,'bidPrice','b')||num(t24,'bidPrice','b'),ask=num(bk,'askPrice','a')||num(t24,'askPrice','a'),mid=(bid+ask)/2,spread=(bid&&ask&&mid)?((ask-bid)/mid*100):99;const vRatio=m.vma5?m.vol/m.vma5:0,impulse=m.vma10?m.vma5/m.vma10:0,vola=volatility15(a);const trend=(m.ema9>m.ema21?1:0)+(h.ema9>h.ema21?1:0)+(m.macd>m.signal?1:0)+(m.hist>m.prevHist?1:0),p=tradePlan(a,b,m,h);const out={name,qv,ch,spread,vRatio,impulse,vola,trend,buy:score(m,h,p).buy,m,h,p};out.rpot=resistancePotential(out);return out}
 async function findDaily3(){
  const btn=$('find3');btn.disabled=true;btn.textContent='⏳ Destek Fırsatları Taranıyor…';$('scanStatus').textContent='24 saatlik hacim ve likidite adayları alınıyor…';$('candidateGrid').innerHTML='';
  try{
@@ -319,7 +310,7 @@ async function findDaily3(){
   const eligibleMetrics=metrics.filter(x=>x.rpot&&x.rpot.eligible);
   if(eligibleMetrics.length===0){
     $('candidateGrid').innerHTML='';
-    $('scanStatus').textContent='⚠️ V4.3 kriterlerine uygun fırsat bulunamadı. Kriterler gevşetilmedi.';
+    $('scanStatus').textContent='⚠️ V4.6 kriterlerine uygun fırsat bulunamadı. Kriterler gevşetilmedi.';
     return;
   }
   eligibleMetrics.sort((a,b)=>(b.candidate-a.candidate)||((b.rpot?.upside1||0)-(a.rpot?.upside1||0)));
@@ -327,8 +318,8 @@ async function findDaily3(){
   const inputs=[$('c1'),$('c2'),$('c3')];
   inputs.forEach((el,i)=>el.value=winners[i]?.name||'');
   localStorage.setItem('coins3',JSON.stringify(winners.map(x=>x.name)));
-  $('candidateGrid').innerHTML=winners.map((x,i)=>`<div class="cand"><b>${i+1}. ${x.name}/TRY</b><div class="cp ${x.candidate>=75?'good':x.candidate>=60?'mid':''}">${x.candidate.toFixed(0)}/100</div><small>Desteğe mesafe: ${x.p.dist>0?'+':''}${x.p.dist.toFixed(2)}%</small><small>Dönüş teyidi: ${x.p.bounce?'VAR':'BEKLENİYOR'}</small><small>15dk hacim: ${x.vRatio.toFixed(2)}× MA5</small><small>Spread: ${x.spread.toFixed(3)}%</small><div class="respot"><b>DİRENCE ULAŞMA POTANSİYELİ</b><strong class="${potentialClass(x.rpot.score)}">${x.rpot.score.toFixed(1)}/10</strong><small>Direnç 1 alanı: +${x.rpot.upside1.toFixed(2)}% • Hedef: ${fmt(x.rpot.t1,6)}</small><small>Desteğe uzaklık: ${Math.abs(x.p.dist).toFixed(2)}% • Risk/Kazanç: 1:${Math.max(0,x.rpot.rr).toFixed(2)}</small></div></div>`).join('');
-  $('scanStatus').textContent=`✅ V4.3 kriterlerine uygun ${winners.length} fırsat seçildi. Yalnızca uygun coinler gösteriliyor; kriterler gevşetilmedi. BTC/ETH hariç. Giriş analizi yapılıyor…`;await run({manual:true});await saveSWSettings(winners.map(x=>x.name));
+  $('candidateGrid').innerHTML=winners.map((x,i)=>`<div class="cand"><b>${i+1}. ${x.name}/TRY</b><div class="cp ${x.candidate>=75?'good':x.candidate>=60?'mid':''}">${x.candidate.toFixed(0)}/100</div><small>Desteğe mesafe: ${x.p.dist>0?'+':''}${x.p.dist.toFixed(2)}%</small><small>Dönüş teyidi: ${x.p.bounce?'VAR':'BEKLENİYOR'}</small><small>15dk hacim: ${x.vRatio.toFixed(2)}× MA5</small><small>Spread: ${x.spread.toFixed(3)}%</small><div class="respot"><b>DİRENCE ULAŞMA POTANSİYELİ</b><strong class="${potentialClass(x.rpot.score)}">${x.rpot.score.toFixed(1)}/10</strong><small>Gerçek Direnç-1 alanı: +${x.rpot.upside1.toFixed(2)}% • Hedef: ${fmt(x.rpot.t1,6)}</small><small>Desteğe uzaklık: ${Math.abs(x.p.dist).toFixed(2)}% • Risk/Kazanç: 1:${Math.max(0,x.rpot.rr).toFixed(2)}</small></div></div>`).join('');
+  $('scanStatus').textContent=`✅ V4.6 kriterlerine uygun ${winners.length} fırsat seçildi. Yalnızca uygun coinler gösteriliyor; kriterler gevşetilmedi. BTC/ETH hariç. Giriş analizi yapılıyor…`;await run({manual:true});await saveSWSettings(winners.map(x=>x.name));
  }catch(e){$('scanStatus').textContent='⚠️ Tarama tamamlanamadı: '+e.message}
  finally{btn.disabled=false;btn.textContent='🎯 DESTEĞE EN YAKIN 3 FIRSATI BUL'}
 }
@@ -342,7 +333,7 @@ async function runManualCoin(){
  box.innerHTML=`<div class="coin"><div class="coin-title">${n}/TRY</div><div class="sub">15 dk + 1 saat verileri alınıyor…</div></div>`;
  try{
    const data=await analyze(n);
-   const upside=data?.p?.target1 && data?.m?.price ? ((data.p.target1/data.m.price)-1)*100 : NaN;
+   const upside=data?.p?.t1 && data?.m?.price ? ((data.p.t1/data.m.price)-1)*100 : NaN;
    let warn='';
    if(Number.isFinite(upside)&&upside<3) warn=`<div class="manualWarn">⚠️ Direnç-1 kâr alanı %${upside.toFixed(2)}. Day-trade ana kriterimiz olan %3'ün altında; yine de manuel isteğiniz nedeniyle analiz gösteriliyor.</div>`;
    box.innerHTML=card(n,data,null)+warn;
@@ -375,7 +366,7 @@ let next15Target=nextBoundary(15*60*1000), next1hTarget=nextBoundary(60*60*1000)
 function updateCountdown(){const now=Date.now();$('next15').textContent=msToClock(next15Target-now);$('next1h').textContent=msToClock(next1hTarget-now)}
 async function showSystemNotification(title,body,tag){
  if(Notification.permission!=='granted'||!('serviceWorker' in navigator))return;
- try{const reg=await navigator.serviceWorker.ready;await reg.showNotification(title,{body,icon:'icons/icon-192.png',badge:'icons/icon-192.png',tag,renotify:true,vibrate:[120,70,120],data:{url:'./index.html'}})}catch(e){}
+ try{const reg=await navigator.serviceWorker.ready;await reg.showNotification(title,{body,icon:'./icons/icon-192.png?v=450',badge:'./icons/icon-192.png?v=450',tag,renotify:true,vibrate:[120,70,120],data:{url:'./'}})}catch(e){}
 }
 function summaryLine(r){if(!r.data)return `${r.name}: veri yok`;return `${r.name} ${decisionText(r.data.s).replace(/[🟢🟡🔴]/g,'').trim()} ${r.data.s.buy}/10`}
 async function autoNotify(results,hourly){
@@ -386,7 +377,7 @@ function scheduleAuto(){
  clearTimeout(autoTimer); next15Target=nextBoundary(15*60*1000); next1hTarget=nextBoundary(60*60*1000); updateCountdown();
  const target=next15Target, hourly=(target%(60*60*1000)===0), delay=Math.max(1500,target-Date.now()+6000);
  autoTimer=setTimeout(async()=>{try{await run({auto:true,hourly,boundary:target})}finally{scheduleAuto()}},delay);
- $('autoStatus').textContent=`Otomatik takip aktif • Her 15 dk kapanışında yeniler${Notification.permission==='granted'?' • Bildirim açık':' • Bildirim kapalı'}.`;
+ $('autoStatus').textContent=`Otomatik takip aktif • Uygulama açıkken her 15 dk kapanışında yeniler${Notification.permission==='granted'?' • Bildirim açık':' • Bildirim kapalı'}.`;
 }
 async function saveSWSettings(names){
  if(!('serviceWorker' in navigator))return;try{const reg=await navigator.serviceWorker.ready;reg.active?.postMessage({type:'SETTINGS',coins:names})}catch(e){}
@@ -398,7 +389,7 @@ async function enableNotifications(){
  if(perm==='granted'){
    $('notifyBtn').textContent='✅ Bildirim Açık — Test Gönder';$('notifyBtn').classList.add('on');
    $('autoStatus').textContent='Bildirim izni verildi. Şimdi test bildirimi gönderiliyor…';
-   await showSystemNotification('Coin Analiz V3.6','Test bildirimi başarılıysa sistem bildirimi olarak bunu görmelisin.','coin-test-v32');
+   await showSystemNotification('Coin Analiz V4.6','Test bildirimi başarılıysa sistem bildirimi olarak bunu görmelisin.','coin-test-v45');
    $('autoStatus').textContent='Bildirim açık. Test bildirimi gönderildi. Uygulama açıkken 15 dk/saat kapanışlarında otomatik çalışır; kapalıyken tarayıcı arka plan politikasına bağlıdır.';
    await registerPeriodic();
  } else if(perm==='denied'){
@@ -407,7 +398,7 @@ async function enableNotifications(){
  } else { $('autoStatus').textContent='Bildirim izni verilmedi.'; }
 }
 async function registerPeriodic(){
- try{const reg=await navigator.serviceWorker.ready;if('periodicSync' in reg){await reg.periodicSync.register('coin-quarter-hour',{minInterval:15*60*1000});$('autoStatus').textContent+=' • Arka plan periyodik kontrolü kaydedildi.';}else{$('autoStatus').textContent+=' • Bu cihaz periyodik arka plan kontrolünü desteklemiyor.';}}catch(e){$('autoStatus').textContent+=' • Arka plan kontrol izni tarayıcı tarafından sınırlandı.';}
+ try{const reg=await navigator.serviceWorker.ready;if('periodicSync' in reg){await reg.periodicSync.register('coin-quarter-hour',{minInterval:15*60*1000});$('autoStatus').textContent+=' • Arka plan periyodik kontrol isteği kaydedildi; çalışma zamanı Android/Chrome tarafından belirlenir.';}else{$('autoStatus').textContent+=' • Bu cihaz periyodik arka plan kontrolünü desteklemiyor.';}}catch(e){$('autoStatus').textContent+=' • Arka plan kontrol izni tarayıcı tarafından sınırlandı.';}
 }
 $('notifyBtn').onclick=enableNotifications;
 setInterval(updateCountdown,1000);
@@ -415,8 +406,8 @@ document.addEventListener('visibilitychange',()=>{if(!document.hidden){const las
 
 if('serviceWorker' in navigator){window.addEventListener('load',async()=>{try{
  const regs=await navigator.serviceWorker.getRegistrations();
- for(const r of regs){ if(r.active && !String(r.active.scriptURL).includes('sw.js?v=420')) await r.unregister(); }
- const reg=await navigator.serviceWorker.register('./sw.js?v=420',{updateViaCache:'none'});
+ for(const r of regs){ if(r.active && !String(r.active.scriptURL).includes('sw.js?v=450')) await r.unregister(); }
+ const reg=await navigator.serviceWorker.register('./sw.js?v=450',{updateViaCache:'none'});
  await reg.update();
  if(Notification.permission==='granted'){$('notifyBtn').textContent='✅ Bildirim Açık — Test Gönder';$('notifyBtn').classList.add('on');await registerPeriodic();}
  else if(Notification.permission==='denied'){$('notifyBtn').textContent='🚫 Bildirim Engelli';$('autoStatus').textContent='Bildirim izni engelli. Android uygulama/Chrome bildirim ayarını aç.';}
