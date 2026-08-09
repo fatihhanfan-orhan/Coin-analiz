@@ -1,0 +1,8 @@
+GitHub ana klasorune bu 3 dosyayi yukleyin ve ayni isimli dosyalarin uzerine yazin:
+1) index.html
+2) OneSignalSDKWorker.js
+3) sw.js
+
+OneSignal panelinde Web Site URL degeri tam olarak su origin olmali:
+https://fatihhanfan-orhan.github.io
+Repo yolu (/Coin-analiz/) Site URL alanina eklenmez.
