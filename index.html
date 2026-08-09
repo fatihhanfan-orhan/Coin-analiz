@@ -6,9 +6,9 @@
 <meta name="theme-color" content="#08111f" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-<link rel="manifest" href="./manifest.webmanifest?v=460" />
-<link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png?v=460">
-<link rel="apple-touch-icon" href="./icon-192.png?v=460">
+<link rel="manifest" href="./manifest.webmanifest?v=462" />
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxOTIgMTkyIj4KPHJlY3Qgd2lkdGg9IjE5MiIgaGVpZ2h0PSIxOTIiIHJ4PSIzOCIgZmlsbD0iIzA4MTExZiIvPgo8cGF0aCBkPSJNMzUgMTMyIEw3MiA5NiBMMTAwIDExMyBMMTUxIDU4IiBmaWxsPSJub25lIiBzdHJva2U9IiMzMWQxNTgiIHN0cm9rZS13aWR0aD0iMTQiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPgo8cGF0aCBkPSJNMTE5IDU4IEgxNTEgVjkwIiBmaWxsPSJub25lIiBzdHJva2U9IiM3YzNhZWQiIHN0cm9rZS13aWR0aD0iMTQiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPgo8Y2lyY2xlIGN4PSI3MiIgY3k9Ijk2IiByPSI4IiBmaWxsPSIjZmZiZjJmIi8+CjxjaXJjbGUgY3g9IjEwMCIgY3k9IjExMyIgcj0iOCIgZmlsbD0iIzMxZDE1OCIvPgo8L3N2Zz4=">
+<link rel="apple-touch-icon" href="./ikon-192.png?v=462">
 <meta name="mobile-web-app-capable" content="yes">
 
 <title>Coin Analiz v4.6</title>
@@ -44,7 +44,7 @@
 </head>
 <body><div class="wrap">
 <div class="card header">
-  <div class="title"><img src="./icon-192.png?v=460" alt=""><div><h1>COIN <span class="accent">ANALİZ</span></h1><div class="sub">3'lü Day Trade Değerlendirme Paneli • 15 dk giriş + 1 saat trend teyidi • v4.6 • YAPI: 4.6-FINAL</div></div></div>
+  <div class="title"><img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxOTIgMTkyIj4KPHJlY3Qgd2lkdGg9IjE5MiIgaGVpZ2h0PSIxOTIiIHJ4PSIzOCIgZmlsbD0iIzA4MTExZiIvPgo8cGF0aCBkPSJNMzUgMTMyIEw3MiA5NiBMMTAwIDExMyBMMTUxIDU4IiBmaWxsPSJub25lIiBzdHJva2U9IiMzMWQxNTgiIHN0cm9rZS13aWR0aD0iMTQiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPgo8cGF0aCBkPSJNMTE5IDU4IEgxNTEgVjkwIiBmaWxsPSJub25lIiBzdHJva2U9IiM3YzNhZWQiIHN0cm9rZS13aWR0aD0iMTQiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPgo8Y2lyY2xlIGN4PSI3MiIgY3k9Ijk2IiByPSI4IiBmaWxsPSIjZmZiZjJmIi8+CjxjaXJjbGUgY3g9IjEwMCIgY3k9IjExMyIgcj0iOCIgZmlsbD0iIzMxZDE1OCIvPgo8L3N2Zz4=" alt="Coin Analiz"><div><h1>COIN <span class="accent">ANALİZ</span></h1><div class="sub">3'lü Day Trade Değerlendirme Paneli • 15 dk giriş + 1 saat trend teyidi • v4.6 • YAPI: 4.6-FINAL</div></div></div>
 </div>
 <div class="card finder"><button id="find3" class="finderBtn">🎯 DESTEĞE EN YAKIN 3 FIRSATI BUL</button><div id="scanStatus" class="scanstatus">Binance TR TRY piyasasını tarar; BTC ve ETH hariç, Direnç-1'e en az %3 kâr alanı bulunan, desteğe en fazla %3 uzak ve hedefe hızlı ulaşma ihtimali güçlü 3 day-trade fırsatını seçer.</div><div id="candidateGrid" class="candidateGrid"></div><div class="method">FIRSAT PUANI ≠ AL PUANI. Ön eleme: gerçek Direnç-1 kâr alanı ≥ %3, desteğe uzaklık ≤ %3, risk/kazanç ≥ 1:1.30 ve uygun likidite/spread. Puan: %35 kâr marjı + %25 hedefe ulaşma + %20 destek/dönüş + %15 hacim/momentum + %5 likidite/spread. BTC/ETH hariç.</div></div>
 <div class="controls">
@@ -71,6 +71,7 @@
 <div class="card summary"><b>ALIM PUANINA GÖRE SIRALAMA</b><div id="ranking" class="rank"><div class="sub">Analiz sonrası burada sıralanacak.</div></div><div class="note">Bu panel emir vermez. Teknik göstergeleri puanlar. Haber, token unlock, ani piyasa hareketi ve emir defteri ayrıca değerlendirilmelidir.</div></div>
 </div>
 <script>
+const INLINE_ICON='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxOTIgMTkyIj4KPHJlY3Qgd2lkdGg9IjE5MiIgaGVpZ2h0PSIxOTIiIHJ4PSIzOCIgZmlsbD0iIzA4MTExZiIvPgo8cGF0aCBkPSJNMzUgMTMyIEw3MiA5NiBMMTAwIDExMyBMMTUxIDU4IiBmaWxsPSJub25lIiBzdHJva2U9IiMzMWQxNTgiIHN0cm9rZS13aWR0aD0iMTQiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPgo8cGF0aCBkPSJNMTE5IDU4IEgxNTEgVjkwIiBmaWxsPSJub25lIiBzdHJva2U9IiM3YzNhZWQiIHN0cm9rZS13aWR0aD0iMTQiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPgo8Y2lyY2xlIGN4PSI3MiIgY3k9Ijk2IiByPSI4IiBmaWxsPSIjZmZiZjJmIi8+CjxjaXJjbGUgY3g9IjEwMCIgY3k9IjExMyIgcj0iOCIgZmlsbD0iIzMxZDE1OCIvPgo8L3N2Zz4=';
 const $=id=>document.getElementById(id), fmt=(n,d=4)=>Number.isFinite(n)?n.toLocaleString('tr-TR',{maximumFractionDigits:d}):'–';
 function ema(a,p){const k=2/(p+1);let o=[a[0]];for(let i=1;i<a.length;i++)o.push(a[i]*k+o[i-1]*(1-k));return o}
 function sma(a,p){return a.map((_,i)=>i<p-1?NaN:a.slice(i-p+1,i+1).reduce((x,y)=>x+y,0)/p)}
@@ -307,8 +308,15 @@ async function findDaily3(){
   }
   const eligibleMetrics=metrics.filter(x=>x.rpot&&x.rpot.eligible);
   if(eligibleMetrics.length===0){
+    // Eski sonuçların ekranda kalmasını engelle: önceki BANK vb. coinler yeni fırsatmış gibi görünmesin.
+    const inputs=[$('c1'),$('c2'),$('c3')];
+    inputs.forEach(el=>el.value='');
+    localStorage.setItem('coins3',JSON.stringify([]));
     $('candidateGrid').innerHTML='';
-    $('scanStatus').textContent='⚠️ V4.6 kriterlerine uygun fırsat bulunamadı. Kriterler gevşetilmedi.';
+    $('coins').innerHTML='';
+    $('ranking').innerHTML='<div class="sub">Uygun fırsat bulunamadı.</div>';
+    await saveSWSettings([]);
+    $('scanStatus').textContent='⚠️ 32 coin tarandı; V4.6 kriterlerine uygun fırsat bulunamadı. Eski sonuçlar temizlendi, kriterler gevşetilmedi.';
     return;
   }
   eligibleMetrics.sort((a,b)=>(b.candidate-a.candidate)||((b.rpot?.upside1||0)-(a.rpot?.upside1||0)));
@@ -365,8 +373,19 @@ function nextBoundary(step){const now=Date.now();return Math.ceil((now+1000)/ste
 let next15Target=nextBoundary(15*60*1000), next1hTarget=nextBoundary(60*60*1000), autoTimer=null;
 function updateCountdown(){const now=Date.now();$('next15').textContent=msToClock(next15Target-now);$('next1h').textContent=msToClock(next1hTarget-now)}
 async function showSystemNotification(title,body,tag){
- if(Notification.permission!=='granted'||!('serviceWorker' in navigator))return;
- try{const reg=await navigator.serviceWorker.ready;await reg.showNotification(title,{body,icon:'./icon-192.png?v=460',badge:'./icon-192.png?v=460',tag,renotify:true,vibrate:[120,70,120],data:{url:'./'}})}catch(e){}
+ if(!('Notification' in window)) throw new Error("Bu tarayıcı bildirim API'sini desteklemiyor.");
+ if(Notification.permission!=='granted') throw new Error('Bildirim izni verilmemiş: '+Notification.permission);
+ if(!('serviceWorker' in navigator)) throw new Error('Service Worker desteklenmiyor.');
+ try{
+   let reg=await navigator.serviceWorker.getRegistration('./');
+   if(!reg) reg=await navigator.serviceWorker.ready;
+   if(!reg) throw new Error('Aktif Service Worker bulunamadı.');
+   await reg.showNotification(title,{body,icon:INLINE_ICON,badge:INLINE_ICON,tag,renotify:true,vibrate:[120,70,120],data:{url:'./'}});
+   return true;
+ }catch(e){
+   console.error('Coin Analiz bildirim hatası:',e);
+   throw e;
+ }
 }
 function summaryLine(r){if(!r.data)return `${r.name}: veri yok`;return `${r.name} ${decisionText(r.data.s).replace(/[🟢🟡🔴]/g,'').trim()} ${r.data.s.buy}/10`}
 async function autoNotify(results,hourly){
@@ -389,8 +408,14 @@ async function enableNotifications(){
  if(perm==='granted'){
    $('notifyBtn').textContent='✅ Bildirim Açık — Test Gönder';$('notifyBtn').classList.add('on');
    $('autoStatus').textContent='Bildirim izni verildi. Şimdi test bildirimi gönderiliyor…';
-   await showSystemNotification('Coin Analiz V4.6','Test bildirimi başarılıysa sistem bildirimi olarak bunu görmelisin.','coin-test-v46');
-   $('autoStatus').textContent='Bildirim açık. Test bildirimi gönderildi. Uygulama açıkken 15 dk/saat kapanışlarında otomatik çalışır; kapalıyken tarayıcı arka plan politikasına bağlıdır.';
+   try{
+     await showSystemNotification('Coin Analiz V4.6','✅ Test bildirimi çalışıyor. 15 dk / 1 saat uyarıları için sistem bildirimi hazır.','coin-test-v462');
+     $('autoStatus').textContent='✅ Test bildirimi başarıyla gönderildi. Uygulama açıkken 15 dk/saat kapanışlarında otomatik çalışır; kapalıyken Android/Chrome arka plan politikasına bağlıdır.';
+   }catch(e){
+     $('autoStatus').textContent='❌ Test bildirimi gönderilemedi: '+(e?.message||String(e));
+     $('notifyBtn').textContent='⚠️ Bildirim Hatası — Tekrar Dene';
+     return;
+   }
    await registerPeriodic();
  } else if(perm==='denied'){
    $('notifyBtn').textContent='🚫 Bildirim Engelli';
@@ -406,8 +431,8 @@ document.addEventListener('visibilitychange',()=>{if(!document.hidden){const las
 
 if('serviceWorker' in navigator){window.addEventListener('load',async()=>{try{
  const regs=await navigator.serviceWorker.getRegistrations();
- for(const r of regs){ if(r.active && !String(r.active.scriptURL).includes('sw.js?v=460')) await r.unregister(); }
- const reg=await navigator.serviceWorker.register('./sw.js?v=460',{updateViaCache:'none'});
+ for(const r of regs){ if(r.active && !String(r.active.scriptURL).includes('sw.js?v=462')) await r.unregister(); }
+ const reg=await navigator.serviceWorker.register('./sw.js?v=462',{updateViaCache:'none'});
  await reg.update();
  if(Notification.permission==='granted'){$('notifyBtn').textContent='✅ Bildirim Açık — Test Gönder';$('notifyBtn').classList.add('on');await registerPeriodic();}
  else if(Notification.permission==='denied'){$('notifyBtn').textContent='🚫 Bildirim Engelli';$('autoStatus').textContent='Bildirim izni engelli. Android uygulama/Chrome bildirim ayarını aç.';}
