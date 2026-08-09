@@ -1,4 +1,4 @@
-const CACHE='coin-analiz-v462';
+const CACHE='coin-analiz-v463';
 const CORE=['./','./index.html','./manifest.webmanifest','./ikon-192.png','./ikon-512.png'];
 
 self.addEventListener('install',event=>{
@@ -52,13 +52,13 @@ self.addEventListener('notificationclick',event=>{
 });
 
 self.addEventListener('periodicsync',event=>{
-  if(event.tag==='coin-quarter-hour'){
+  if(event.tag==='coin-four-hour'){
     event.waitUntil(
       self.registration.showNotification('Coin Analiz V4.6',{
-        body:'Yeni 15 dakikalık kontrol zamanı. Güncel analiz için Coin Analiz’i açın.',
+        body:'4 saatlik piyasa tarama zamanı. Güncel 3 fırsatı taramak için Coin Analiz’i açın.',
         icon:'./ikon-192.png',
         badge:'./ikon-192.png',
-        tag:'coin-periodic-v462',
+        tag:'coin-periodic-v463',
         data:{url:'./'}
       })
     );
