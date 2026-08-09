@@ -6,11 +6,33 @@
 <meta name="theme-color" content="#08111f" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-<link rel="manifest" href="./manifest.webmanifest?v=463" />
+<link rel="manifest" href="./manifest.webmanifest?v=464" />
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxOTIgMTkyIj4KPHJlY3Qgd2lkdGg9IjE5MiIgaGVpZ2h0PSIxOTIiIHJ4PSIzOCIgZmlsbD0iIzA4MTExZiIvPgo8cGF0aCBkPSJNMzUgMTMyIEw3MiA5NiBMMTAwIDExMyBMMTUxIDU4IiBmaWxsPSJub25lIiBzdHJva2U9IiMzMWQxNTgiIHN0cm9rZS13aWR0aD0iMTQiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPgo8cGF0aCBkPSJNMTE5IDU4IEgxNTEgVjkwIiBmaWxsPSJub25lIiBzdHJva2U9IiM3YzNhZWQiIHN0cm9rZS13aWR0aD0iMTQiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPgo8Y2lyY2xlIGN4PSI3MiIgY3k9Ijk2IiByPSI4IiBmaWxsPSIjZmZiZjJmIi8+CjxjaXJjbGUgY3g9IjEwMCIgY3k9IjExMyIgcj0iOCIgZmlsbD0iIzMxZDE1OCIvPgo8L3N2Zz4=">
-<link rel="apple-touch-icon" href="./ikon-192.png?v=463">
+<link rel="apple-touch-icon" href="./ikon-192.png?v=464">
 <meta name="mobile-web-app-capable" content="yes">
 
+<script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
+<script>
+window.OneSignalDeferred = window.OneSignalDeferred || [];
+window.COIN_ONESIGNAL_READY = new Promise(resolve => { window.__coinResolveOneSignal = resolve; });
+OneSignalDeferred.push(async function(OneSignal) {
+  try {
+    const basePath = new URL('./', window.location.href).pathname;
+    const workerPath = (basePath + 'OneSignalSDKWorker.js').replace(/^\//, '');
+    const pushScope = basePath + 'onesignal-push/';
+    await OneSignal.init({
+      appId: "ff896540-819b-40b0-a829-853c95d35bda",
+      serviceWorkerPath: workerPath,
+      serviceWorkerParam: { scope: pushScope }
+    });
+    window.COIN_ONESIGNAL = OneSignal;
+    window.__coinResolveOneSignal?.(OneSignal);
+  } catch (e) {
+    console.error('OneSignal init hatası:', e);
+    window.__coinResolveOneSignal?.(null);
+  }
+});
+</script>
 <title>Coin Analiz v4.6</title>
 <style>
 :root{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#eef3fb;background:#08111f}
@@ -433,16 +455,34 @@ function schedule4hScan(){
 async function saveSWSettings(names){
  if(!('serviceWorker' in navigator))return;try{const reg=await navigator.serviceWorker.ready;reg.active?.postMessage({type:'SETTINGS',coins:names})}catch(e){}
 }
+async function enableOneSignalPush(){
+  try{
+    const OneSignal=await Promise.race([
+      window.COIN_ONESIGNAL_READY||Promise.resolve(null),
+      new Promise(r=>setTimeout(()=>r(null),10000))
+    ]);
+    if(!OneSignal)return {ok:false,msg:'OneSignal SDK hazır değil.'};
+    if(!OneSignal.Notifications.isPushSupported())return {ok:false,msg:'Bu tarayıcı OneSignal Web Push desteklemiyor.'};
+    if(!OneSignal.Notifications.permission)await OneSignal.Notifications.requestPermission();
+    if(!OneSignal.Notifications.permission)return {ok:false,msg:'OneSignal bildirim izni verilmedi.'};
+    await OneSignal.User.PushSubscription.optIn();
+    const opted=!!OneSignal.User.PushSubscription.optedIn;
+    const id=OneSignal.User.PushSubscription.id||'';
+    return {ok:opted,msg:opted?('OneSignal arka plan push kaydı hazır'+(id?' • Abonelik: '+id.slice(0,8)+'…':'')):'OneSignal push aboneliği etkinleşmedi.'};
+  }catch(e){return {ok:false,msg:'OneSignal: '+(e?.message||String(e))};}
+}
+
 async function enableNotifications(){
  if(!('Notification' in window)){ $('autoStatus').textContent='Bu tarayıcı sistem bildirimlerini desteklemiyor.'; return; }
  let perm=Notification.permission;
  if(perm==='default') perm=await Notification.requestPermission();
  if(perm==='granted'){
    $('notifyBtn').textContent='✅ Bildirim Açık — Test Gönder';$('notifyBtn').classList.add('on');
-   $('autoStatus').textContent='Bildirim izni verildi. Şimdi test bildirimi gönderiliyor…';
+   $('autoStatus').textContent='Bildirim izni verildi. OneSignal arka plan push kaydı hazırlanıyor…';
+   const os=await enableOneSignalPush();
    try{
-     await showSystemNotification('Coin Analiz V4.6','✅ Test bildirimi çalışıyor. Önemli 15 dk / 1 saat değişiklikleri ve 4 saatlik fırsat taraması için sistem hazır.','coin-test-v463');
-     $('autoStatus').textContent='✅ Test bildirimi gönderildi. 15 dk ve 1 saat kontrolleri sürer; bildirim yalnız önemli değişiklikte gelir. 4 saatte bir piyasa taraması uygulama açıkken otomatik çalışır.';
+     await showSystemNotification('Coin Analiz V4.6','✅ Test bildirimi çalışıyor. Önemli 15 dk / 1 saat değişiklikleri ve 4 saatlik fırsat taraması için sistem hazır.','coin-test-v464');
+     $('autoStatus').textContent='✅ Test bildirimi gönderildi. '+os.msg+' • 15 dk/1 saat önemli değişiklik takibi + 4 saat piyasa taraması aktif.';
    }catch(e){
      $('autoStatus').textContent='❌ Test bildirimi gönderilemedi: '+(e?.message||String(e));
      $('notifyBtn').textContent='⚠️ Bildirim Hatası — Tekrar Dene';
@@ -468,10 +508,18 @@ document.addEventListener('visibilitychange',()=>{if(!document.hidden){
 
 if('serviceWorker' in navigator){window.addEventListener('load',async()=>{try{
  const regs=await navigator.serviceWorker.getRegistrations();
- for(const r of regs){ if(r.active && !String(r.active.scriptURL).includes('sw.js?v=463')) await r.unregister(); }
- const reg=await navigator.serviceWorker.register('./sw.js?v=463',{updateViaCache:'none'});
+ for(const r of regs){ if(r.active){
+   const u=String(r.active.scriptURL||'');
+   const keep=u.includes('/sw.js')||u.includes('/OneSignalSDKWorker.js');
+   if(!keep) await r.unregister();
+  } }
+ const reg=await navigator.serviceWorker.register('./sw.js?v=464',{updateViaCache:'none'});
  await reg.update();
- if(Notification.permission==='granted'){$('notifyBtn').textContent='✅ Bildirim Açık — Test Gönder';$('notifyBtn').classList.add('on');await registerPeriodic();}
+ if(Notification.permission==='granted'){
+   $('notifyBtn').textContent='✅ Bildirim Açık — Test Gönder';$('notifyBtn').classList.add('on');
+   try{const os=await enableOneSignalPush();if(os.ok)$('autoStatus').textContent='✅ '+os.msg;}catch{}
+   await registerPeriodic();
+  }
  else if(Notification.permission==='denied'){$('notifyBtn').textContent='🚫 Bildirim Engelli';$('autoStatus').textContent='Bildirim izni engelli. Android uygulama/Chrome bildirim ayarını aç.';}
  }catch(e){$('autoStatus').textContent='Service worker güncelleme hatası: '+e.message;} scheduleAuto();schedule4hScan();
  const lastScan=+(localStorage.getItem('last4hScan')||0);if(Date.now()-lastScan>=STEP4H)setTimeout(()=>findDaily3({auto:true}),2500);
