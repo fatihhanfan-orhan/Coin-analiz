@@ -1,8 +1,8 @@
 {
   "name": "Coin Analiz — 3'lü Day Trade Paneli V4.6 FINAL ",
   "short_name": "Coin Analiz",
-  "start_url": "/",
-  "scope": "/",
+  "start_url": "/Coin-analiz/",
+"scope": "/Coin-analiz/",
   "display": "standalone",
   "background_color": "#08111f",
   "theme_color": "#08111f",
