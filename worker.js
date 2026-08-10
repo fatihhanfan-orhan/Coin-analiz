@@ -1,4 +1,4 @@
-const BINANCE = "https://api.binance.com/api/v3";
+"https://data-api.binance.vision/api/v3";
 
 export default {
   async fetch(request, env) {
