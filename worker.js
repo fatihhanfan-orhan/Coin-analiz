@@ -16,9 +16,17 @@ export default {
       return Response.json(results);
     }
 
-    return new Response("Coin Analiz Worker aktif", {
-      headers: { "content-type": "text/plain; charset=UTF-8" }
-    });
+    if (url.pathname === "/health" || url.pathname === "/") {
+      return Response.json({
+        ok: true,
+        service: "Coin Analiz Worker",
+        oneSignalAppIdConfigured: Boolean(env.ONESIGNAL_APP_ID),
+        oneSignalApiKeyConfigured: Boolean(env.ONESIGNAL_API_KEY),
+        cronCoins: (env.COINS || "BTCUSDT,ETHUSDT,SOLUSDT").split(",").map(x => x.trim()).filter(Boolean)
+      });
+    }
+
+    return new Response("Not found", { status: 404 });
   },
 
   async scheduled(event, env, ctx) {
