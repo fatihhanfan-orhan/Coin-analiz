@@ -58,7 +58,7 @@ window.CoinOneSignalReady = new Promise((resolve) => {
       await OneSignal.init({
         appId: COIN_OS_APP_ID,
         serviceWorkerPath: COIN_OS_WORKER_PATH,
-        serviceWorkerParam: { scope: COIN_APP_BASE + "onesignal/" }
+        serviceWorkerParam: { scope: COIN_APP_BASE }
       });
       window.CoinOneSignal = OneSignal;
       resolve(OneSignal);
