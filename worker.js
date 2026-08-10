@@ -4,12 +4,12 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
-    if (url.pathname === "/test") {
-      const result = await scan(env, false);
-      return Response.json(result);
+    if (url.pathname === "/scan") {
+      const results = await scan(env, false);
+      return Response.json(results);
     }
 
-    return new Response("Coin Analiz 7/24 Worker aktif", {
+    return new Response("Coin Analiz Worker aktif", {
       headers: { "content-type": "text/plain; charset=UTF-8" }
     });
   },
@@ -19,7 +19,7 @@ export default {
   }
 };
 
-async function scan(env, sendNotifications = true) {
+async function scan(env, sendNotification = false) {
   const coins = (env.COINS || "BTCUSDT,ETHUSDT,SOLUSDT")
     .split(",")
     .map(x => x.trim().toUpperCase())
@@ -29,49 +29,55 @@ async function scan(env, sendNotifications = true) {
 
   for (const symbol of coins) {
     try {
-      const result = await analyse(symbol);
+      const result = await analyze(symbol);
       results.push(result);
 
       if (
-        sendNotifications &&
-        result.buyScore >= 8.5 &&
-        result.rewardPct >= 3 &&
-        result.rr >= 1.3
+        sendNotification &&
+        result.buyScore >= 8.5
       ) {
-        await notify(env, result);
+        await sendOneSignal(env, result);
       }
-    } catch (e) {
+    } catch (error) {
       results.push({
         symbol,
-        error: e?.message || String(e)
+        error: String(error.message || error)
       });
     }
   }
 
-  return {
-    ok: true,
-    checkedAt: new Date().toISOString(),
-    threshold: 8.5,
-    results
-  };
+  return results;
 }
 
-async function analyse(symbol) {
-  const [k15, k1h] = await Promise.all([
-    klines(symbol, "15m", 120),
-    klines(symbol, "1h", 100)
-  ]);
+async function analyze(symbol) {
+  const k15 = await klines(symbol, "15m", 120);
+  const k1h = await klines(symbol, "1h", 80);
 
-  const close15 = k15.map(x => +x[4]);
-  const high15 = k15.map(x => +x[2]);
-  const low15 = k15.map(x => +x[3]);
-  const vol15 = k15.map(x => +x[5]);
-  const close1h = k1h.map(x => +x[4]);
+  const close15 = k15.map(x => Number(x[4]));
+  const close1h = k1h.map(x => Number(x[4]));
+  const volumes = k15.map(x => Number(x[5]));
 
   const price = last(close15);
 
-  const support = Math.min(...low15.slice(-24));
-  const resistance = Math.max(...high15.slice(-24));
+  const ema9 = ema(close15, 9);
+  const ema21 = ema(close15, 21);
+
+  const ema9h = ema(close1h, 9);
+  const ema21h = ema(close1h, 21);
+
+  const rsiValue = rsi(close15, 14);
+  const macdValue = macd(close15);
+
+  const recentVolume = avg(volumes.slice(-5));
+  const previousVolume = avg(volumes.slice(-10, -5));
+  const volumeRatio =
+    previousVolume > 0 ? recentVolume / previousVolume : 1;
+
+  const lows = k15.slice(-30).map(x => Number(x[3]));
+  const highs = k15.slice(-30).map(x => Number(x[2]));
+
+  const support = Math.min(...lows);
+  const resistance = Math.max(...highs);
 
   const supportDistancePct =
     ((price - support) / price) * 100;
@@ -80,72 +86,186 @@ async function analyse(symbol) {
     ((resistance - price) / price) * 100;
 
   const riskPct =
-    Math.max(((price - support) / price) * 100, 0.15);
+    ((price - support) / price) * 100;
 
-  const rr = rewardPct / riskPct;
-
-  const ema9 = EMA(close15, 9);
-  const ema21 = EMA(close15, 21);
-
-  const ema9h = EMA(close1h, 9);
-  const ema21h = EMA(close1h, 21);
-
-  const rsi = RSI(close15, 14);
-
-  const macdFast = EMA(close15, 12);
-  const macdSlow = EMA(close15, 26);
-  const macd = macdFast - macdSlow;
-
-  const volumes = vol15.slice(-21, -1);
-  const avgVol =
-    volumes.reduce((a, b) => a + b, 0) /
-    Math.max(volumes.length, 1);
-
-  const volumeRatio =
-    avgVol > 0 ? last(vol15) / avgVol : 0;
+  const rr =
+    riskPct > 0 ? rewardPct / riskPct : 0;
 
   let score = 0;
 
-  // GİRİŞ NOKTASI: toplam 4 puan
-  if (supportDistancePct <= 0.5) score += 2.0;
-  else if (supportDistancePct <= 1) score += 1.6;
-  else if (supportDistancePct <= 1.5) score += 1.1;
-  else if (supportDistancePct <= 2) score += 0.5;
-
-  if (rewardPct >= 5) score += 1.2;
-  else if (rewardPct >= 4) score += 1.0;
-  else if (rewardPct >= 3) score += 0.7;
-
-  if (rr >= 2) score += 0.8;
-  else if (rr >= 1.5) score += 0.6;
-  else if (rr >= 1.3) score += 0.4;
-
   // 15 DK TREND
-  if (price > ema9 && ema9 > ema21) score += 1.5;
-  else if (price > ema21) score += 0.7;
+  if (price > ema9 && ema9 > ema21) {
+    score += 2.5;
+  } else if (price > ema21) {
+    score += 1;
+  }
 
   // 1 SAAT TEYİDİ
-  if (last(close1h) > ema9h && ema9h > ema21h)
+  if (
+    last(close1h) > ema9h &&
+    ema9h > ema21h
+  ) {
     score += 1.5;
-  else if (last(close1h) > ema21h)
+  } else if (last(close1h) > ema21h) {
     score += 0.7;
+  }
 
   // RSI
-  if (rsi >= 45 && rsi <= 65) score += 1.0;
-  else if (rsi >= 40 && rsi < 70) score += 0.5;
+  if (rsiValue >= 45 && rsiValue <= 65) {
+    score += 1.5;
+  } else if (rsiValue >= 40 && rsiValue < 70) {
+    score += 0.7;
+  }
 
   // MACD
-  if (macd > 0) score += 1.0;
+  if (macdValue > 0) {
+    score += 1;
+  }
 
   // HACİM
-  if (volumeRatio >= 1.5) score += 1.0;
-  else if (volumeRatio >= 1.15) score += 0.5;
+  if (volumeRatio >= 1.5) {
+    score += 1;
+  } else if (volumeRatio >= 1.15) {
+    score += 0.5;
+  }
+
+  // DESTEK YAKINLIĞI
+  if (supportDistancePct <= 2) {
+    score += 1;
+  }
+
+  // RİSK / ÖDÜL
+  if (rr >= 2) {
+    score += 1.5;
+  } else if (rr >= 1.5) {
+    score += 1;
+  }
 
   const buyScore =
     Math.min(10, Math.round(score * 10) / 10);
 
   return {
     symbol,
-    price,
-    support,
-    resistance
+    price: round(price),
+    support: round(support),
+    resistance: round(resistance),
+    supportDistancePct: round(supportDistancePct),
+    rewardPct: round(rewardPct),
+    riskPct: round(riskPct),
+    rr: round(rr),
+    rsi: round(rsiValue),
+    volumeRatio: round(volumeRatio),
+    buyScore
+  };
+}
+
+async function klines(symbol, interval, limit) {
+  const url =
+    `${BINANCE}/klines?symbol=${encodeURIComponent(symbol)}` +
+    `&interval=${interval}&limit=${limit}`;
+
+  const response = await fetch(url);
+
+  if (!response.ok) {
+    throw new Error(
+      `Binance ${symbol}: HTTP ${response.status}`
+    );
+  }
+
+  return response.json();
+}
+
+function ema(values, period) {
+  const multiplier = 2 / (period + 1);
+  let value = values[0];
+
+  for (let i = 1; i < values.length; i++) {
+    value =
+      values[i] * multiplier +
+      value * (1 - multiplier);
+  }
+
+  return value;
+}
+
+function rsi(values, period = 14) {
+  let gains = 0;
+  let losses = 0;
+
+  const start = Math.max(1, values.length - period);
+
+  for (let i = start; i < values.length; i++) {
+    const change = values[i] - values[i - 1];
+
+    if (change >= 0) {
+      gains += change;
+    } else {
+      losses += Math.abs(change);
+    }
+  }
+
+  if (losses === 0) return 100;
+
+  const rs = gains / losses;
+  return 100 - 100 / (1 + rs);
+}
+
+function macd(values) {
+  return ema(values, 12) - ema(values, 26);
+}
+
+function avg(values) {
+  if (!values.length) return 0;
+
+  return (
+    values.reduce((sum, value) => sum + value, 0) /
+    values.length
+  );
+}
+
+function last(values) {
+  return values[values.length - 1];
+}
+
+function round(value) {
+  return Math.round(value * 100) / 100;
+}
+
+async function sendOneSignal(env, result) {
+  if (!env.ONESIGNAL_APP_ID || !env.ONESIGNAL_API_KEY) {
+    return;
+  }
+
+  const message =
+    `${result.symbol} ALIM SİNYALİ\n` +
+    `Puan: ${result.buyScore}/10\n` +
+    `Fiyat: ${result.price}\n` +
+    `RSI: ${result.rsi}\n` +
+    `Hacim: ${result.volumeRatio}x`;
+
+  const response = await fetch(
+    "https://api.onesignal.com/notifications",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Key ${env.ONESIGNAL_API_KEY}`
+      },
+      body: JSON.stringify({
+        app_id: env.ONESIGNAL_APP_ID,
+        included_segments: ["Subscribed Users"],
+        headings: {
+          en: "Coin Analiz"
+        },
+        contents: {
+          en: message
+        }
+      })
+    }
+  );
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`OneSignal: ${response.status} ${text}`);
+  }
+}
