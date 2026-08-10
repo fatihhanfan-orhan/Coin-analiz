@@ -1,4 +1,11 @@
-const BINANCE ="https://data-api.binance.vision/api/v3";
+const BINANCE_ENDPOINTS = [
+  "https://data-api.binance.vision/api/v3",
+  "https://api-gcp.binance.com/api/v3",
+  "https://api1.binance.com/api/v3",
+  "https://api2.binance.com/api/v3",
+  "https://api3.binance.com/api/v3",
+  "https://api4.binance.com/api/v3"
+];
 
 export default {
   async fetch(request, env) {
