@@ -96,7 +96,7 @@ window.CoinOneSignalReady = new Promise((resolve) => {
   <div class="monbox"><div class="monlabel">SONRAKİ 1 SAAT KAPANIŞ</div><div class="monvalue" id="next1h">–</div></div>
   <div class="monbox"><div class="monlabel">CANLI GİRİŞ TAKİBİ</div><div class="monvalue good" id="liveTrack">60 sn</div></div>
   <div class="monbox"><div class="monlabel">SON CANLI KONTROL</div><div class="monvalue" id="liveChecked">–</div></div>
-  <button id="notifyBtn" class="notifybtn">🔔 Bildirimi Aç ve Test Et</button>
+  <button id="notifyBtn" class="notifybtn">🔔 OneSignal Bildirimini Aç</button>
   <div class="autostatus" id="autoStatus">Otomatik takip hazırlanıyor…</div>
 </div>
 <div class="compare-wrap"><div class="coins" id="coins"></div></div>
@@ -352,49 +352,50 @@ async function findDaily3(){
    x.candidate=Math.max(0,Math.min(100,profitPts+reachPts2+supportPts+momentumPts+liquidPts-chasePenalty-belowPenalty-overheat));
   }
   const eligibleMetrics=metrics.filter(x=>x.rpot&&x.rpot.eligible);
-eligibleMetrics.sort((a,b)=>(b.candidate-a.candidate)||((b.rpot?.upside1||0)-(a.rpot?.upside1||0)));
+  eligibleMetrics.sort((a,b)=>(b.candidate-a.candidate)||((b.rpot?.upside1||0)-(a.rpot?.upside1||0)));
 
-const eligibleNames=new Set(eligibleMetrics.map(x=>x.name));
-const backupMetrics=metrics
-  .filter(x=>x.rpot&&!eligibleNames.has(x.name))
-  .sort((a,b)=>(b.candidate-a.candidate)||((b.rpot?.upside1||0)-(a.rpot?.upside1||0)));
+  const eligibleNames=new Set(eligibleMetrics.map(x=>x.name));
+  const backupMetrics=metrics
+    .filter(x=>x.rpot&&!eligibleNames.has(x.name))
+    .sort((a,b)=>(b.candidate-a.candidate)||((b.rpot?.upside1||0)-(a.rpot?.upside1||0)));
 
-const winners=[...eligibleMetrics.slice(0,3)];
-for(const x of backupMetrics){
-  if(winners.length>=3)break;
-  winners.push(x);
-}
-if(!winners.length)throw new Error('Analiz edilebilir coin bulunamadı.');
+  const winners=[...eligibleMetrics.slice(0,3)];
+  for(const x of backupMetrics){
+    if(winners.length>=3)break;
+    winners.push(x);
+  }
 
-function backupReason(x){
-  const r=[];
-  if(!x.rpot?.hasResistance)r.push('teyitli Direnç-1 yok');
-  if((x.rpot?.upside1||0)<3)r.push('kâr alanı %3 altında');
-  if((x.rpot?.signedDist??99)<0)r.push('destek altı');
-  else if((x.rpot?.signedDist??99)>3)r.push('desteğe %3’ten uzak');
-  if((x.rpot?.rr||0)<1.30)r.push('risk/kazanç 1:1.30 altında');
-  if((x.spread??99)>.35)r.push('spread yüksek');
-  return r.length?r.join(' • '):'ana V4.6 filtresinin altında';
-}
+  if(!winners.length)throw new Error('Analiz edilebilir coin bulunamadı.');
 
-const inputs=[$('c1'),$('c2'),$('c3')];
-inputs.forEach((el,i)=>el.value=winners[i]?.name||'');
-localStorage.setItem('coins3',JSON.stringify(winners.map(x=>x.name)));
+  winners.sort((a,b)=>(b.candidate-a.candidate)||((b.rpot?.upside1||0)-(a.rpot?.upside1||0)));
 
-$('candidateGrid').innerHTML=winners.map((x,i)=>{
-  const ok=!!x.rpot?.eligible;
-  return `<div class="cand"><b>${ok?'🟢 FIRSAT':'🟡 YEDEK ADAY'} • ${i+1}. ${x.name}/TRY</b><div class="cp ${x.candidate>=75?'good':x.candidate>=60?'mid':''}">${x.candidate.toFixed(0)}/100</div><small>Desteğe mesafe: ${x.p.dist>0?'+':''}${x.p.dist.toFixed(2)}%</small><small>Dönüş teyidi: ${x.p.bounce?'VAR':'BEKLENİYOR'}</small><small>15dk hacim: ${x.vRatio.toFixed(2)}× MA5</small><small>Spread: ${x.spread.toFixed(3)}%</small>${ok?'':`<small style="color:#ffbf2f">Neden yedek: ${backupReason(x)}</small>`}<div class="respot"><b>DİRENCE ULAŞMA POTANSİYELİ</b><strong class="${potentialClass(x.rpot.score)}">${x.rpot.score.toFixed(1)}/10</strong><small>Gerçek Direnç-1 alanı: +${x.rpot.upside1.toFixed(2)}% • Hedef: ${fmt(x.rpot.t1,6)}</small><small>Desteğe uzaklık: ${Math.abs(x.p.dist).toFixed(2)}% • Risk/Kazanç: 1:${Math.max(0,x.rpot.rr).toFixed(2)}</small></div></div>`;
-}).join('');
+  function backupReason(x){
+    const r=[];
+    if(!x.rpot?.hasResistance)r.push('teyitli Direnç-1 yok');
+    if((x.rpot?.upside1||0)<3)r.push('kâr alanı %3 altında');
+    if((x.rpot?.signedDist??99)<0)r.push('destek altı');
+    else if((x.rpot?.signedDist??99)>3)r.push('desteğe %3’ten uzak');
+    if((x.rpot?.rr||0)<1.30)r.push('risk/kazanç 1:1.30 altında');
+    if((x.spread??99)>.35)r.push('spread yüksek');
+    return r.length?r.join(' • '):'ana V4.6 filtresinin altında';
+  }
 
-const goodCount=winners.filter(x=>x.rpot?.eligible).length;
-$('scanStatus').textContent=goodCount===3
-  ?'✅ 3 coin de V4.6 kriterlerine uygun. Giriş analizi yapılıyor…'
-  :`🟡 ${goodCount} uygun fırsat bulundu; liste en yüksek puanlı ${3-goodCount} YEDEK ADAY ile tamamlandı. Yedekler AL sinyali değildir. Giriş analizi yapılıyor…`;
+  const inputs=[$('c1'),$('c2'),$('c3')];
+  inputs.forEach((el,i)=>el.value=winners[i]?.name||'');
+  localStorage.setItem('coins3',JSON.stringify(winners.map(x=>x.name)));
 
-await run({manual:true});
-await saveSWSettings(winners.map(x=>x.name)); localStorage.setItem('coins3',JSON.stringify(winners.map(x=>x.name)));
-  $('candidateGrid').innerHTML=winners.map((x,i)=>`<div class="cand"><b>${i+1}. ${x.name}/TRY</b><div class="cp ${x.candidate>=75?'good':x.candidate>=60?'mid':''}">${x.candidate.toFixed(0)}/100</div><small>Desteğe mesafe: ${x.p.dist>0?'+':''}${x.p.dist.toFixed(2)}%</small><small>Dönüş teyidi: ${x.p.bounce?'VAR':'BEKLENİYOR'}</small><small>15dk hacim: ${x.vRatio.toFixed(2)}× MA5</small><small>Spread: ${x.spread.toFixed(3)}%</small><div class="respot"><b>DİRENCE ULAŞMA POTANSİYELİ</b><strong class="${potentialClass(x.rpot.score)}">${x.rpot.score.toFixed(1)}/10</strong><small>Gerçek Direnç-1 alanı: +${x.rpot.upside1.toFixed(2)}% • Hedef: ${fmt(x.rpot.t1,6)}</small><small>Desteğe uzaklık: ${Math.abs(x.p.dist).toFixed(2)}% • Risk/Kazanç: 1:${Math.max(0,x.rpot.rr).toFixed(2)}</small></div></div>`).join('');
-  $('scanStatus').textContent=`✅ V4.6 kriterlerine uygun ${winners.length} fırsat seçildi. Yalnızca uygun coinler gösteriliyor; kriterler gevşetilmedi. BTC/ETH hariç. Giriş analizi yapılıyor…`;await run({manual:true});await saveSWSettings(winners.map(x=>x.name));
+  $('candidateGrid').innerHTML=winners.map((x,i)=>{
+    const ok=!!x.rpot?.eligible;
+    return `<div class="cand"><b>${ok?'🟢 FIRSAT':'🟡 YEDEK ADAY'} • ${i+1}. ${x.name}/TRY</b><div class="cp ${x.candidate>=75?'good':x.candidate>=60?'mid':''}">${x.candidate.toFixed(0)}/100</div><small>Desteğe mesafe: ${x.p.dist>0?'+':''}${x.p.dist.toFixed(2)}%</small><small>Dönüş teyidi: ${x.p.bounce?'VAR':'BEKLENİYOR'}</small><small>15dk hacim: ${x.vRatio.toFixed(2)}× MA5</small><small>Spread: ${x.spread.toFixed(3)}%</small>${ok?'':`<small style="color:#ffbf2f">Neden yedek: ${backupReason(x)}</small>`}<div class="respot"><b>DİRENCE ULAŞMA POTANSİYELİ</b><strong class="${potentialClass(x.rpot.score)}">${x.rpot.score.toFixed(1)}/10</strong><small>Gerçek Direnç-1 alanı: +${x.rpot.upside1.toFixed(2)}% • Hedef: ${fmt(x.rpot.t1,6)}</small><small>Desteğe uzaklık: ${Math.abs(x.p.dist).toFixed(2)}% • Risk/Kazanç: 1:${Math.max(0,x.rpot.rr).toFixed(2)}</small></div></div>`;
+  }).join('');
+
+  const goodCount=winners.filter(x=>x.rpot?.eligible).length;
+  $('scanStatus').textContent=goodCount===3
+    ?'✅ 3 coin de V4.6 kriterlerine uygun. Puan sırasına göre gösteriliyor. Giriş analizi yapılıyor…'
+    :`🟡 ${goodCount} uygun fırsat bulundu; liste ${3-goodCount} YEDEK ADAY ile tamamlandı. Tümü puan sırasına göre gösteriliyor. Yedekler AL sinyali değildir. Giriş analizi yapılıyor…`;
+
+  await run({manual:true});
+  await saveSWSettings(winners.map(x=>x.name));
  }catch(e){$('scanStatus').textContent='⚠️ Tarama tamamlanamadı: '+e.message}
  finally{btn.disabled=false;btn.textContent='🎯 DESTEĞE EN YAKIN 3 FIRSATI BUL'}
 }
@@ -452,23 +453,18 @@ async function getNotificationRegistration(){
    await new Promise(r=>setTimeout(r,600));
    reg=await navigator.serviceWorker.getRegistration(probeUrl);
  }
+ if(!reg) reg=await navigator.serviceWorker.getRegistration(COIN_APP_BASE);
+ if(!reg) reg=await navigator.serviceWorker.ready;
  if(!reg) throw new Error('OneSignal Service Worker kaydı bulunamadı.');
  return reg;
 }
 async function showSystemNotification(title,body,tag){
  if(!('Notification' in window)) throw new Error("Bu tarayıcı bildirim API'sini desteklemiyor.");
  if(Notification.permission!=='granted') throw new Error('Bildirim izni verilmemiş: '+Notification.permission);
+ if(!('serviceWorker' in navigator)) throw new Error('Service Worker desteklenmiyor.');
  try{
    const reg=await getNotificationRegistration();
-   await reg.showNotification(title,{
-     body,
-     icon:'./ikon-192.png',
-     badge:'./ikon-192.png',
-     tag,
-     renotify:true,
-     vibrate:[180,80,180],
-     data:{url:new URL(COIN_APP_BASE,location.origin).href}
-   });
+   await reg.showNotification(title,{body,icon:INLINE_ICON,badge:INLINE_ICON,tag,renotify:true,vibrate:[120,70,120],data:{url:'./'}});
    return true;
  }catch(e){
    console.error('Coin Analiz bildirim hatası:',e);
@@ -540,16 +536,9 @@ async function enableNotifications(){
       throw new Error('Bildirim izni açık ama OneSignal Subscription ID oluşmadı.');
     }
 
-    btn.textContent='✅ Bildirim Açık — Test Geldi';
+    btn.textContent='✅ OneSignal Bildirim Açık';
     btn.classList.add('on');
-    status.textContent='OneSignal aboneliği tamamlandı. Test bildirimi gönderiliyor…';
-    await showSystemNotification(
-      'Coin Analiz V4.6',
-      '✅ Bildirim sistemi çalışıyor. 15 dk / 1 saat uyarıları hazır.',
-      'coin-test-v463'
-    );
-    await registerPeriodic();
-    status.textContent='✅ Bildirim sistemi hazır • Test bildirimi gönderildi • OneSignal ID: '+sid.slice(0,8)+'…';
+    status.textContent='✅ OneSignal aboneliği aktif • Alıcı kaydı tamamlandı • ID: '+sid.slice(0,8)+'…';
   }catch(e){
     console.error('OneSignal abonelik hatası:',e);
     btn.textContent='⚠️ OneSignal — Tekrar Dene';
@@ -559,17 +548,7 @@ async function enableNotifications(){
   }
 }
 async function registerPeriodic(){
- try{
-   const reg=await getNotificationRegistration();
-   if('periodicSync' in reg){
-     await reg.periodicSync.register('coin-quarter-hour',{minInterval:15*60*1000});
-     $('autoStatus').textContent+=' • 15 dk arka plan hatırlatıcısı kaydedildi.';
-   }else{
-     $('autoStatus').textContent+=' • Bu cihaz Periodic Background Sync desteklemiyor; OneSignal push aboneliği yine aktiftir.';
-   }
- }catch(e){
-   $('autoStatus').textContent+=' • Arka plan hatırlatıcısı kaydedilemedi: '+(e?.message||String(e));
- }
+ try{const reg=await navigator.serviceWorker.ready;if('periodicSync' in reg){await reg.periodicSync.register('coin-quarter-hour',{minInterval:15*60*1000});$('autoStatus').textContent+=' • Arka plan periyodik kontrol isteği kaydedildi; çalışma zamanı Android/Chrome tarafından belirlenir.';}else{$('autoStatus').textContent+=' • Bu cihaz periyodik arka plan kontrolünü desteklemiyor.';}}catch(e){$('autoStatus').textContent+=' • Arka plan kontrol izni tarayıcı tarafından sınırlandı.';}
 }
 $('notifyBtn').onclick=enableNotifications;
 setInterval(updateCountdown,1000);
@@ -582,7 +561,7 @@ window.addEventListener('load',async()=>{
   const OS=await Promise.race([window.CoinOneSignalReady,new Promise(r=>setTimeout(()=>r(null),12000))]);
   if(OS){
     if(OS.User?.PushSubscription?.id){
-      btn.textContent='✅ Bildirim Açık — Test Et';
+      btn.textContent='✅ OneSignal Bildirim Açık';
       btn.classList.add('on');
       status.textContent='✅ OneSignal hazır ve cihaz abone.';
     }else{
