@@ -352,16 +352,47 @@ async function findDaily3(){
    x.candidate=Math.max(0,Math.min(100,profitPts+reachPts2+supportPts+momentumPts+liquidPts-chasePenalty-belowPenalty-overheat));
   }
   const eligibleMetrics=metrics.filter(x=>x.rpot&&x.rpot.eligible);
-  if(eligibleMetrics.length===0){
-    $('candidateGrid').innerHTML='';
-    $('scanStatus').textContent='⚠️ V4.6 kriterlerine uygun fırsat bulunamadı. Kriterler gevşetilmedi.';
-    return;
-  }
-  eligibleMetrics.sort((a,b)=>(b.candidate-a.candidate)||((b.rpot?.upside1||0)-(a.rpot?.upside1||0)));
-  const winners=eligibleMetrics.slice(0,Math.min(3,eligibleMetrics.length));
-  const inputs=[$('c1'),$('c2'),$('c3')];
-  inputs.forEach((el,i)=>el.value=winners[i]?.name||'');
-  localStorage.setItem('coins3',JSON.stringify(winners.map(x=>x.name)));
+eligibleMetrics.sort((a,b)=>(b.candidate-a.candidate)||((b.rpot?.upside1||0)-(a.rpot?.upside1||0)));
+
+const eligibleNames=new Set(eligibleMetrics.map(x=>x.name));
+const backupMetrics=metrics
+  .filter(x=>x.rpot&&!eligibleNames.has(x.name))
+  .sort((a,b)=>(b.candidate-a.candidate)||((b.rpot?.upside1||0)-(a.rpot?.upside1||0)));
+
+const winners=[...eligibleMetrics.slice(0,3)];
+for(const x of backupMetrics){
+  if(winners.length>=3)break;
+  winners.push(x);
+}
+if(!winners.length)throw new Error('Analiz edilebilir coin bulunamadı.');
+
+function backupReason(x){
+  const r=[];
+  if(!x.rpot?.hasResistance)r.push('teyitli Direnç-1 yok');
+  if((x.rpot?.upside1||0)<3)r.push('kâr alanı %3 altında');
+  if((x.rpot?.signedDist??99)<0)r.push('destek altı');
+  else if((x.rpot?.signedDist??99)>3)r.push('desteğe %3’ten uzak');
+  if((x.rpot?.rr||0)<1.30)r.push('risk/kazanç 1:1.30 altında');
+  if((x.spread??99)>.35)r.push('spread yüksek');
+  return r.length?r.join(' • '):'ana V4.6 filtresinin altında';
+}
+
+const inputs=[$('c1'),$('c2'),$('c3')];
+inputs.forEach((el,i)=>el.value=winners[i]?.name||'');
+localStorage.setItem('coins3',JSON.stringify(winners.map(x=>x.name)));
+
+$('candidateGrid').innerHTML=winners.map((x,i)=>{
+  const ok=!!x.rpot?.eligible;
+  return `<div class="cand"><b>${ok?'🟢 FIRSAT':'🟡 YEDEK ADAY'} • ${i+1}. ${x.name}/TRY</b><div class="cp ${x.candidate>=75?'good':x.candidate>=60?'mid':''}">${x.candidate.toFixed(0)}/100</div><small>Desteğe mesafe: ${x.p.dist>0?'+':''}${x.p.dist.toFixed(2)}%</small><small>Dönüş teyidi: ${x.p.bounce?'VAR':'BEKLENİYOR'}</small><small>15dk hacim: ${x.vRatio.toFixed(2)}× MA5</small><small>Spread: ${x.spread.toFixed(3)}%</small>${ok?'':`<small style="color:#ffbf2f">Neden yedek: ${backupReason(x)}</small>`}<div class="respot"><b>DİRENCE ULAŞMA POTANSİYELİ</b><strong class="${potentialClass(x.rpot.score)}">${x.rpot.score.toFixed(1)}/10</strong><small>Gerçek Direnç-1 alanı: +${x.rpot.upside1.toFixed(2)}% • Hedef: ${fmt(x.rpot.t1,6)}</small><small>Desteğe uzaklık: ${Math.abs(x.p.dist).toFixed(2)}% • Risk/Kazanç: 1:${Math.max(0,x.rpot.rr).toFixed(2)}</small></div></div>`;
+}).join('');
+
+const goodCount=winners.filter(x=>x.rpot?.eligible).length;
+$('scanStatus').textContent=goodCount===3
+  ?'✅ 3 coin de V4.6 kriterlerine uygun. Giriş analizi yapılıyor…'
+  :`🟡 ${goodCount} uygun fırsat bulundu; liste en yüksek puanlı ${3-goodCount} YEDEK ADAY ile tamamlandı. Yedekler AL sinyali değildir. Giriş analizi yapılıyor…`;
+
+await run({manual:true});
+await saveSWSettings(winners.map(x=>x.name)); localStorage.setItem('coins3',JSON.stringify(winners.map(x=>x.name)));
   $('candidateGrid').innerHTML=winners.map((x,i)=>`<div class="cand"><b>${i+1}. ${x.name}/TRY</b><div class="cp ${x.candidate>=75?'good':x.candidate>=60?'mid':''}">${x.candidate.toFixed(0)}/100</div><small>Desteğe mesafe: ${x.p.dist>0?'+':''}${x.p.dist.toFixed(2)}%</small><small>Dönüş teyidi: ${x.p.bounce?'VAR':'BEKLENİYOR'}</small><small>15dk hacim: ${x.vRatio.toFixed(2)}× MA5</small><small>Spread: ${x.spread.toFixed(3)}%</small><div class="respot"><b>DİRENCE ULAŞMA POTANSİYELİ</b><strong class="${potentialClass(x.rpot.score)}">${x.rpot.score.toFixed(1)}/10</strong><small>Gerçek Direnç-1 alanı: +${x.rpot.upside1.toFixed(2)}% • Hedef: ${fmt(x.rpot.t1,6)}</small><small>Desteğe uzaklık: ${Math.abs(x.p.dist).toFixed(2)}% • Risk/Kazanç: 1:${Math.max(0,x.rpot.rr).toFixed(2)}</small></div></div>`).join('');
   $('scanStatus').textContent=`✅ V4.6 kriterlerine uygun ${winners.length} fırsat seçildi. Yalnızca uygun coinler gösteriliyor; kriterler gevşetilmedi. BTC/ETH hariç. Giriş analizi yapılıyor…`;await run({manual:true});await saveSWSettings(winners.map(x=>x.name));
  }catch(e){$('scanStatus').textContent='⚠️ Tarama tamamlanamadı: '+e.message}
