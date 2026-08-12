@@ -2,16 +2,17 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "coin-analiz",
   "main": "worker.js",
-  "compatibility_date": "2026-08-10",
-
+  "compatibility_date": "2026-08-12",
   "triggers": {
-    "crons": [
-      "2,17,32,47 * * * *"
-    ]
+    "crons": ["*/15 * * * *"]
   },
-
+  "kv_namespaces": [
+    {
+      "binding": "COIN_KV",
+      "id": "aa7ebdd403ae4cafb1f458b28e06924c"
+    }
+  ],
   "vars": {
-    "COINS": "BTCUSDT,ETHUSDT,SOLUSDT",
     "ONESIGNAL_APP_ID": "ff896540-819b-40b0-a829-853c95d35bda",
     "APP_URL": "https://fatihhanfan-orhan.github.io/Coin-analiz/"
   }
