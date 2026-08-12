@@ -1,13 +1,15 @@
 // Coin Analiz V5.0 FINAL Worker — 15dk + 1saat gerçek arka plan push
-const BINANCE_24H_URLS = [
-  'https://api.binance.me/api/v3/ticker/24hr',
-  'https://cloudme-tr.2meta.app/api/v1/ticker/24hr'
+const BINANCE_API_BASES = [
+  'https://data-api.binance.vision/api/v3',
+  'https://api-gcp.binance.com/api/v3',
+  'https://api1.binance.com/api/v3',
+  'https://api2.binance.com/api/v3',
+  'https://api3.binance.com/api/v3',
+  'https://api4.binance.com/api/v3'
 ];
 
-const BINANCE_BOOK_URLS = [
-  'https://api.binance.me/api/v3/ticker/bookTicker',
-  'https://cloudme-tr.2meta.app/api/v1/ticker/bookTicker'
-];
+const BINANCE_24H_URLS = BINANCE_API_BASES.map(base => `${base}/ticker/24hr`);
+const BINANCE_BOOK_URLS = BINANCE_API_BASES.map(base => `${base}/ticker/bookTicker`);
 
 const TOP_N = 32;
 const TRACK_COUNT = 3;
@@ -29,8 +31,8 @@ export default {
         const state = await loadState(env);
         return json({
           ok: true,
-          service: 'Coin Analiz Worker V4.6 — 7/24 Bildirim',
-          version: '4.6-WORKER-PROFIT-4H',
+          service: 'Coin Analiz Worker V5.0 — 7/24 Bildirim',
+          version: '5.0-WORKER-PROFIT-4H',
           kvConfigured: Boolean(env.COIN_KV),
           oneSignalAppIdConfigured: Boolean(env.ONESIGNAL_APP_ID),
           oneSignalApiKeyConfigured: Boolean(env.ONESIGNAL_API_KEY),
@@ -507,11 +509,7 @@ function closedKlines(rows,interval){
 
 async function klines(name,interval){
   const clean=cleanBase(name);
-  const urls=[
-    `https://api.binance.me/api/v1/klines?symbol=${clean}TRY&interval=${interval}&limit=220`,
-    `https://cloudme-tr.2meta.app/api/v1/klines?symbol=${clean}_TRY&interval=${interval}&limit=220`,
-    `https://cloudme-tr.2meta.app/api/v1/klines?symbol=${clean}TRY&interval=${interval}&limit=220`
-  ];
+  const urls=BINANCE_API_BASES.map(base => `${base}/klines?symbol=${clean}TRY&interval=${interval}&limit=220`);
   const j=await fetchJsonAny(urls);
   const raw=Array.isArray(j)?j:j?.data;
   const d=Array.isArray(raw)?closedKlines(raw,interval):[];
@@ -521,11 +519,7 @@ async function klines(name,interval){
 
 async function ticker24(name){
   const clean=cleanBase(name);
-  return fetchJsonAny([
-    `https://api.binance.me/api/v3/ticker/24hr?symbol=${clean}TRY`,
-    `https://cloudme-tr.2meta.app/api/v1/ticker/24hr?symbol=${clean}_TRY`,
-    `https://cloudme-tr.2meta.app/api/v1/ticker/24hr?symbol=${clean}TRY`
-  ]);
+  return fetchJsonAny(BINANCE_API_BASES.map(base => `${base}/ticker/24hr?symbol=${clean}TRY`));
 }
 
 async function all24hTickers(){return unwrapArray(await fetchJsonAny(BINANCE_24H_URLS));}
