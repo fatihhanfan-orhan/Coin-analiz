@@ -99,11 +99,12 @@ export default {
     const t = new Date(Number(controller.scheduledTime || Date.now()));
     const minute = t.getUTCMinutes();
     const hour = t.getUTCHours();
+    const turkeyHour = (hour + 3) % 24;
     // Önerilen Cron: */15 * * * *
     // Her tetikte takip edilen coinlerde uygun pozisyon kontrolü.
     // Saat başında saatlik özet; 4 saatte bir tam 32 coin taraması.
     const hourly = minute === 0;
-    const fourHourly = hourly && (hour % 4 === 0);
+    const fourHourly = hourly && (turkeyHour % 4 === 0);
     ctx.waitUntil(backgroundCycle(env, {
       notify: true,
       source: 'cron',
