@@ -52,8 +52,10 @@ export default {
           lastCriticalNotificationAt: state.lastCriticalNotificationAt || null,
           lastAnalysisErrors: state.lastAnalysisErrors || [],
           lastNotificationErrors: state.lastNotificationErrors || [],
+          lastSummaryStatus: state.lastSummaryStatus || null,
+          trackedSyncedAt: state.trackedSyncedAt || null,
           updatedAt: state.updatedAt || null,
-          dataSource: 'Binance TR TRY',
+          dataSource: 'Binance TR TRY — tarayıcı REST + Worker WebSocket BID',
           recommendedCrons: ['* * * * *']
         });
       }
@@ -92,21 +94,26 @@ export default {
         const names = normalizeNames(body.coins || body.names || []);
         if (!names.length) return json({ ok:false, error:'Coin listesi boş.' }, 400);
 
-        const analyzed = [];
-        for (const name of names.slice(0, TRACK_COUNT)) {
-          try { analyzed.push(await analyzeCandidate(name, null, new Map())); }
-          catch (e) { analyzed.push({ name, error: String(e?.message || e) }); }
+        const synced = normalizeSyncedAnalyses(body.analyses || [], names);
+        const analyzed = [...synced];
+        if (!synced.length) {
+          for (const name of names.slice(0, TRACK_COUNT)) {
+            try { analyzed.push(await analyzeCandidate(name, null, new Map())); }
+            catch (e) { analyzed.push({ name, error: String(e?.message || e) }); }
+          }
         }
         const good = analyzed.filter(x => !('error' in x));
         if (!good.length) return json({ ok:false, error:'Takip için geçerli veri alınamadı.', details:analyzed }, 422);
 
         const previous = await loadState(env);
+        const syncedAt = new Date().toISOString();
         const next = {
           ...previous,
           tracked: sortByProfit(good).slice(0, TRACK_COUNT),
-          trackedSource: 'web-selection',
-          source: 'web-selection',
-          updatedAt: new Date().toISOString()
+          trackedSource: synced.length ? 'web-analysis' : 'web-selection',
+          trackedSyncedAt: syncedAt,
+          source: synced.length ? 'web-analysis' : 'web-selection',
+          updatedAt: syncedAt
         };
         await saveState(env, next);
         return json({ ok:true, tracked: next.tracked, updatedAt: next.updatedAt });
@@ -158,24 +165,15 @@ export default {
     const cron = String(controller.cron || '');
     if (cron !== '* * * * *') return;
 
-    // Tek dakikalık zamanlayıcı: aynı KV anahtarına çakışan cron yazılarını engeller.
-    // Çeyrek dakikada teknik plan yenilenir; diğer dakikalarda yalnız canlı BID ile risk kontrolü yapılır.
+    // Tek dakikalık zamanlayıcı: her çalışmada önce Binance TR WebSocket BID ile pozisyon riski kontrol edilir.
+    // Cloudflare çıkışındaki Binance REST WAF engeline karşı ağır analiz tarayıcıda yapılır ve Worker'a senkronlanır.
     const quarterHourly = minute % 15 === 0;
     const fourHourly = minute === 1 && turkeyHour % 4 === 3;
-    if (quarterHourly || fourHourly) {
-      ctx.waitUntil(backgroundCycle(env, {
-        notify:true,
-        collectAlerts:true,
-        source:fourHourly ? 'cron-4h' : 'cron-quarter',
-        cron,
-        quarterHourly,
-        hourly:quarterHourly && minute === 0,
-        fourHourly,
-        scheduledAt:t.toISOString()
-      }));
-      return;
-    }
-    ctx.waitUntil(runFastPositionCycle(env, t.toISOString()));
+    ctx.waitUntil(runFastPositionCycle(env, t.toISOString(), {
+      quarterHourly,
+      hourly: quarterHourly && minute === 0,
+      fourHourly
+    }));
   }
 };
 
@@ -487,18 +485,110 @@ function buildPositionRiskAlert({name, price, stop, target, entry, highWater, pn
   return null;
 }
 
-async function runFastPositionCycle(env, scheduledAt) {
+async function fetchBinanceTrBookMap(names, timeoutMs = 6500) {
+  const cleanNames = normalizeNames(names).slice(0, TRACK_COUNT);
+  if (!cleanNames.length) return {bookMap:new Map(), errors:[]};
+
+  // Yerel birim testlerinde scheduler yoktur; mevcut REST taklidiyle aynı mantık doğrulanır.
+  if (!globalThis.scheduler?.wait) {
+    const books = await allBookTickers();
+    return {bookMap:new Map(books.map(x => [String(x.symbol || x.s || ''), x])), errors:[]};
+  }
+
+  const settled = await Promise.allSettled(cleanNames.map(name => fetchBinanceTrBookTicker(name, timeoutMs)));
+  const bookMap = new Map(), errors = [];
+  settled.forEach((result, index) => {
+    const name = cleanNames[index];
+    if (result.status === 'fulfilled') bookMap.set(name+'TRY', result.value);
+    else errors.push(`${name}: ${String(result.reason?.message || result.reason)}`);
+  });
+  if (!bookMap.size) throw new Error(errors.join(' | ') || 'Binance TR WebSocket BID alınamadı');
+  return {bookMap, errors};
+}
+
+async function fetchBinanceTrBookTicker(name, timeoutMs = 6500) {
+  const clean = cleanBase(name);
+  const url = `https://stream-cloud.binance.tr/ws/${clean.toLowerCase()}try@bookTicker`;
+  const response = await fetch(url, {headers:{Upgrade:'websocket'}});
+  const socket = response.webSocket;
+  if (!socket) throw new Error(`WebSocket bağlantısı reddedildi (HTTP ${response.status})`);
+  socket.accept();
+  try {
+    const message = new Promise((resolve, reject) => {
+      socket.addEventListener('message', event => {
+        try {
+          const parsed = JSON.parse(String(event.data));
+          const row = parsed?.data || parsed;
+          const bid = num(row,'bidPrice','b'), ask = num(row,'askPrice','a');
+          if (!(bid > 0) || !(ask > 0)) throw new Error('BID/ASK alanı eksik');
+          resolve({symbol:clean+'TRY', bidPrice:String(bid), askPrice:String(ask), b:String(bid), a:String(ask), source:'BINANCE_TR_WS'});
+        } catch (error) { reject(error); }
+      }, {once:true});
+      socket.addEventListener('error', () => reject(new Error('WebSocket veri hatası')), {once:true});
+    });
+    return await Promise.race([
+      message,
+      globalThis.scheduler.wait(timeoutMs).then(() => { throw new Error('WebSocket zaman aşımı'); })
+    ]);
+  } finally {
+    try { socket.close(1000, 'done'); } catch {}
+  }
+}
+
+async function applyScheduledSummaries(env, state, scheduleMeta = {}) {
+  const errors = [];
+  if (scheduleMeta.quarterHourly) {
+    const syncedAt = Date.parse(state.trackedSyncedAt || '');
+    const fresh = Number.isFinite(syncedAt) && Date.now() - syncedAt <= 20*60*1000;
+    if (fresh && (state.tracked || []).length) {
+      try {
+        await sendQuarterHourSummary(env, state.tracked);
+        state.lastQuarterNotificationAt = scheduleMeta.scheduledAt || new Date().toISOString();
+        if (scheduleMeta.hourly) {
+          await sendHourlySummary(env, state.tracked);
+          state.lastHourlyAt = scheduleMeta.scheduledAt || new Date().toISOString();
+          state.lastHourlyNotificationAt = scheduleMeta.scheduledAt || new Date().toISOString();
+        }
+        state.lastSummaryStatus = 'Taze tarayıcı analiziyle kapanış özeti gönderildi.';
+      } catch (error) {
+        errors.push(`synced-summary: ${String(error?.message || error)}`);
+      }
+    } else {
+      state.lastSummaryStatus = 'Kapanış özeti atlandı: 20 dakikadan yeni tarayıcı analizi yok.';
+    }
+  }
+  if (scheduleMeta.fourHourly) {
+    try {
+      await sendOneSignal(env, [{
+        type:'FOUR_HOUR_REMINDER', name:'COIN',
+        title:'🔎 Coin Analiz — 4 Saatlik Tarama Zamanı',
+        body:'En uygun TRY coinlerini taze Binance TR verisiyle taramak için uygulamayı aç. Açılışta tarama otomatik başlar.'
+      }]);
+      state.last4hNotificationAt = scheduleMeta.scheduledAt || new Date().toISOString();
+      state.lastSummaryStatus = '4 saatlik taze tarama açılış bildirimi gönderildi.';
+    } catch (error) {
+      errors.push(`four-hour-reminder: ${String(error?.message || error)}`);
+    }
+  }
+  return errors;
+}
+
+async function runFastPositionCycle(env, scheduledAt, scheduleMeta = {}) {
   const previous = await loadState(env);
   const savedPositions = (previous.positions || []).slice(0, TRACK_COUNT);
   if (!savedPositions.length) {
     const idle = {...previous,lastFastPositionCheckAt:scheduledAt || new Date().toISOString(),updatedAt:new Date().toISOString()};
+    const summaryErrors = await applyScheduledSummaries(env, idle, {...scheduleMeta,scheduledAt});
+    idle.lastNotificationErrors = summaryErrors;
     await saveState(env, idle);
     return {ok:true, checked:0, alerts:0};
   }
 
-  let books;
+  let bookMap, quoteErrors = [];
   try {
-    books = await allBookTickers();
+    const quoteResult = await fetchBinanceTrBookMap(savedPositions.map(x => x?.name));
+    bookMap = quoteResult.bookMap;
+    quoteErrors = quoteResult.errors;
   } catch (e) {
     const failed = {
       ...previous,
@@ -510,7 +600,6 @@ async function runFastPositionCycle(env, scheduledAt) {
     await saveState(env, failed);
     return {ok:false,checked:0,alerts:0,error:String(e?.message || e)};
   }
-  const bookMap = new Map(books.map(x => [String(x.symbol || x.s || ''), x]));
   const checked = [];
   const alerts = [];
 
@@ -524,9 +613,7 @@ async function runFastPositionCycle(env, scheduledAt) {
 
       let stop = maxPositive(saved.stop, saved.protectedStop), target = Number(saved.target);
       if (!(stop > 0) || !(target > 0)) {
-        const initialized = await analyzeCandidate(name, null, bookMap);
-        stop = maxPositive(initialized?.p?.stop, saved.protectedStop);
-        target = Number(initialized?.p?.t1);
+        throw new Error('stop/hedef planı eksik; taze analiz için uygulamayı aç');
       }
 
       const highWater = Math.max(entry, Number(saved.highWater) || 0, price);
@@ -574,19 +661,22 @@ async function runFastPositionCycle(env, scheduledAt) {
     lastFastPositionCheckAt:scheduledAt || new Date().toISOString(),
     lastFastPositionSuccessAt:scheduledAt || new Date().toISOString(),
     lastFastPositionAlerts:alerts,
+    lastAnalysisErrors:[],
     updatedAt:new Date().toISOString()
   };
 
+  const notificationErrors = quoteErrors.map(x => `fast-position-data: ${x}`);
   if (alerts.length) {
     try {
       await sendOneSignal(env, alerts);
       for (const alert of alerts) await markAlertSent(env, alert.type, alert.name);
       state.lastCriticalNotificationAt = new Date().toISOString();
-      state.lastNotificationErrors = [];
     } catch (e) {
-      state.lastNotificationErrors = [`fast-position-alerts: ${String(e?.message || e)}`];
+      notificationErrors.push(`fast-position-alerts: ${String(e?.message || e)}`);
     }
   }
+  notificationErrors.push(...await applyScheduledSummaries(env, state, {...scheduleMeta,scheduledAt}));
+  state.lastNotificationErrors = notificationErrors;
   state.updatedAt = new Date().toISOString();
   await Promise.all([saveState(env, state), savePositionsState(env, state)]);
   return {ok:true, checked:positions.length, alerts:alerts.length};
@@ -1038,6 +1128,42 @@ function cors(response){
 function json(data,status=200){return cors(new Response(JSON.stringify(data),{status,headers:{'Content-Type':'application/json; charset=utf-8'}}));}
 
 function normalizeNames(arr){return [...new Set((Array.isArray(arr)?arr:[]).map(cleanBase).filter(Boolean))].filter(x=>!EXCLUDED_BASES.has(x));}
+function normalizeSyncedAnalyses(rows, allowedNames = []) {
+  const allowed = new Set(normalizeNames(allowedNames));
+  const result = [];
+  for (const row of (Array.isArray(rows) ? rows : [])) {
+    if (result.length >= TRACK_COUNT) break;
+    const name = cleanBase(row?.name);
+    if (!name || (allowed.size && !allowed.has(name)) || result.some(x => x.name === name)) continue;
+    const p = row?.p || {}, rpot = row?.rpot || {};
+    const buy = clampNumber(row?.buy, 0, 10, NaN);
+    const stop = Number(p.stop), t1 = Number(p.t1), t2 = Number(p.t2);
+    if (!Number.isFinite(buy) || !(stop > 0) || !(t1 > 0)) continue;
+    result.push({
+      name,
+      buy,
+      candidate:clampNumber(row?.candidate,0,100,0),
+      spread:clampNumber(row?.spread,0,100,99),
+      ch:clampNumber(row?.ch,-1000,1000,0),
+      p:{
+        status:String(p.status || '').slice(0,120),
+        dist:clampNumber(p.dist,-1000,1000,99),
+        near:Boolean(p.near), bounce:Boolean(p.bounce), hasResistance:Boolean(p.hasResistance),
+        stop, t1, t2:Number.isFinite(t2)&&t2>0?t2:t1,
+        rr:clampNumber(p.rr,0,100,0)
+      },
+      rpot:{
+        eligible:Boolean(rpot.eligible),
+        upside1:clampNumber(rpot.upside1,-1000,1000,0),
+        expectedEdge:clampNumber(rpot.expectedEdge,-1000,1000,0),
+        realizable:clampNumber(rpot.realizable,-1000,1000,0),
+        score:clampNumber(rpot.score,0,10,0),
+        rr:clampNumber(rpot.rr,0,100,0)
+      }
+    });
+  }
+  return result;
+}
 function cleanBase(v){return String(v||'').toUpperCase().replace(/\/TRY$/,'').replace(/_?TRY$/,'').replace(/[^A-Z0-9]/g,'');}
 function baseFromSymbol(sym){return String(sym||'').replace(/_?TRY$/,'');}
 function unwrapArray(j){if(Array.isArray(j))return j;if(Array.isArray(j?.data))return j.data;if(Array.isArray(j?.data?.list))return j.data.list;return [];}

@@ -524,7 +524,6 @@ async function findDaily3(opts={}){
 
   if(!opts.auto4h){
     await run({manual:true});
-    await saveSWSettings(winners.map(x=>x.name));
     $('scanStatus').textContent=goodCount===3
       ?'✅ Tarama tamamlandı • 3 coin V5.0 fırsat filtresinden geçti • aşağıdaki kartlarda gerçekleşebilir kâr sırasına dizildi.'
       :`🟡 Tarama tamamlandı • ${goodCount} uygun fırsat ve ${3-goodCount} yedek aday gösteriliyor • yedekler AL sinyali değildir.`;
@@ -1317,7 +1316,7 @@ async function run(opts={}){
     return `<div class="rankrow"><div class="ranknum">${i===0?'🏆':i+1}</div><div class="rankname">${r.name}/TRY<div class="sub">Gerçekleşebilir ~%${fmt(rp,2)} • brüt H1 ${Number.isFinite(pp)?'%'+fmt(pp,2):'—'} • RR 1:${fmt(r.data.p.rr,2)} • spread %${fmt(r.data.spread,3)}${eligible?'':' • filtre zayıf'}</div></div><div class="rankscore ${cls(r.data.s.buy)}">${r.data.s.buy}/10</div></div>`;
  }).join(''):'<div class="err">Geçerli veri alınamadı.</div>';
  $('update').textContent='Son güncelleme: '+new Date().toLocaleTimeString('tr-TR');
- localStorage.setItem('coins3',JSON.stringify(names)); saveSWSettings(names); startMarketWS();
+ localStorage.setItem('coins3',JSON.stringify(names)); await saveSWSettings(names,results); startMarketWS();
  if(opts.live) await liveNotify(results);
   if(opts.auto){ await autoNotify(results,!!opts.hourly); localStorage.setItem('lastAutoBoundary',String(autoBoundary||Date.now())); document.querySelector('.monitor')?.classList.add('pulse');setTimeout(()=>document.querySelector('.monitor')?.classList.remove('pulse'),2500); }
   return results;
@@ -1439,10 +1438,20 @@ function scheduleAuto(){
  autoTimer=setTimeout(async()=>{try{await run({auto:true,hourly,boundary:target})}finally{scheduleAuto()}},delay);
  $('autoStatus').textContent=`Otomatik takip aktif • Canlı WebSocket fiyat/bid-ask • alınmış pozisyon takibi • sunucuda dakikalık kritik risk kontrolü • maksimum kâr alanı puanlaması • kâr sıralaması dinamik • 15 dk/1 saat kapanış takibi • 4 saatte bir yeni coin taraması${Notification.permission==='granted'?' • Bildirim açık':' • Bildirim kapalı'}.`;
 }
-async function saveSWSettings(names){
+async function saveSWSettings(names,analyses=[]){
  const clean=names.map(x=>String(x||'').trim().toUpperCase().replace(/[^A-Z0-9]/g,'')).filter(Boolean).slice(0,3);
+ const allowed=new Set(clean);
+ const compact=(Array.isArray(analyses)?analyses:[]).map(item=>{
+   const name=String(item?.name||'').trim().toUpperCase().replace(/[^A-Z0-9]/g,''),d=item?.data||item;
+   if(!allowed.has(name)||!d?.p||!d?.s)return null;
+   return {
+     name,buy:Number(d.s.buy),candidate:Number(d.candidate||0),spread:Number(d.spread),ch:Number(d.ch||0),
+     p:{status:String(d.p.status||''),dist:Number(d.p.dist),near:Boolean(d.p.near),bounce:Boolean(d.p.bounce),hasResistance:Boolean(d.p.hasResistance),stop:Number(d.p.stop),t1:Number(d.p.t1),t2:Number(d.p.t2),rr:Number(d.p.rr)},
+     rpot:{eligible:Boolean(d.rpot?.eligible),upside1:Number(d.rpot?.upside1),expectedEdge:Number(d.rpot?.expectedEdge),realizable:Number(d.rpot?.realizable),score:Number(d.rpot?.score),rr:Number(d.rpot?.rr)}
+   };
+ }).filter(Boolean).slice(0,3);
  if('serviceWorker' in navigator){try{const reg=await getNotificationRegistration();reg.active?.postMessage({type:'SETTINGS',coins:clean});}catch(e){}}
- try{const r=await fetch(COIN_WORKER_API+'/set-tracked',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({coins:clean})});if(!r.ok)throw new Error('HTTP '+r.status);}catch(e){console.warn('Worker takip listesi gönderilemedi:',e)}
+ try{const r=await fetch(COIN_WORKER_API+'/set-tracked',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({coins:clean,analyses:compact})});if(!r.ok)throw new Error('HTTP '+r.status);}catch(e){console.warn('Worker takip listesi gönderilemedi:',e)}
 }
 async function enableNotifications(){
   const status=$('autoStatus'), btn=$('notifyBtn');
@@ -1519,7 +1528,9 @@ function applyCoinDeepLink(){
 }
 window.addEventListener('load',async()=>{
   scheduleAuto();
-  scheduleFourHourScan();
+  const last4=Number(localStorage.getItem('last4hScan')||0),due4=turkeyFourHourBoundary(Date.now(),false);
+  if(last4<due4&&Date.now()-due4<15*60*1000)setTimeout(()=>{if(!fourHourBusy)runFourHourScan()},20000);
+  else scheduleFourHourScan();
   await syncBinanceClock(true);
   startLiveTracking();
   startPositionLiveTracking();
