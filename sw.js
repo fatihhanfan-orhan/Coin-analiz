@@ -1,4 +1,4 @@
-const CACHE='coin-analiz-v462';
+const CACHE='coin-analiz-v500-12madde';
 const CORE=['./','./index.html','./manifest.webmanifest','./ikon-192.png','./ikon-512.png'];
 
 self.addEventListener('install',event=>{
@@ -40,15 +40,17 @@ self.addEventListener('message',event=>{
 
 self.addEventListener('notificationclick',event=>{
   event.notification.close();
-  const url=event.notification.data?.url || './';
-  event.waitUntil(
-    clients.matchAll({type:'window',includeUncontrolled:true}).then(list=>{
-      for(const client of list){
-        if('focus' in client) return client.focus();
-      }
-      return clients.openWindow(url);
-    })
-  );
+  event.waitUntil((async()=>{
+    const base=new URL('./',self.registration.scope);
+    const requested=new URL(event.notification.data?.coinAnalizUrl||event.notification.data?.url||base.href,base);
+    const url=requested.origin===base.origin&&requested.pathname.startsWith(base.pathname)?requested.href:base.href;
+    const list=await clients.matchAll({type:'window',includeUncontrolled:true});
+    for(const client of list){
+      if('navigate' in client)await client.navigate(url);
+      if('focus' in client)return client.focus();
+    }
+    return clients.openWindow(url);
+  })());
 });
 
 self.addEventListener('periodicsync',event=>{
@@ -59,7 +61,7 @@ self.addEventListener('periodicsync',event=>{
         icon:'./ikon-192.png',
         badge:'./ikon-192.png',
         tag:'coin-periodic-v462',
-        data:{url:'./'}
+        data:{coinAnalizUrl:new URL('./',self.registration.scope).href}
       })
     );
   }

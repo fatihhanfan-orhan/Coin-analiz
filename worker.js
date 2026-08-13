@@ -32,16 +32,18 @@ export default {
         return json({
           ok: true,
           service: 'Coin Analiz Worker V5.0 — 7/24 Bildirim',
-          version: '5.0-WORKER-PROFIT-4H',
+          version: '5.0-WORKER-12MADDE',
           kvConfigured: Boolean(env.COIN_KV),
           oneSignalAppIdConfigured: Boolean(env.ONESIGNAL_APP_ID),
           oneSignalApiKeyConfigured: Boolean(env.ONESIGNAL_API_KEY),
           tracked: (state.tracked || []).map(x => x.name),
           marketTop3: (state.marketTop3 || []).map(x => x.name),
+          activePositions: (state.positions || []).map(x => ({ name:x.name, entry:x.entry, highWater:x.highWater })),
           lastHourlyAt: state.lastHourlyAt || null,
           last4hScanAt: state.last4hScanAt || null,
+          lastPositionCheckAt: state.lastPositionCheckAt || null,
           updatedAt: state.updatedAt || null,
-          recommendedCron: '*/15 * * * *'
+          recommendedCrons: ['*/15 * * * *', '1 */4 * * *']
         });
       }
 
@@ -89,6 +91,31 @@ export default {
         return json({ ok:true, tracked: next.tracked, updatedAt: next.updatedAt });
       }
 
+      // Kullanıcının açık pozisyonlarını, uygulama arka plandayken de 15 dakikada bir izler.
+      if (url.pathname === '/set-positions' && request.method === 'POST') {
+        const body = await request.json().catch(() => ({}));
+        const raw = Array.isArray(body.positions) ? body.positions : [];
+        const previous = await loadState(env);
+        const oldMap = new Map((previous.positions || []).map(x => [cleanBase(x.name), x]));
+        const positions = [];
+        for (const item of raw) {
+          if (positions.length >= TRACK_COUNT) break;
+          const name = cleanBase(item?.name), entry = Number(item?.entry);
+          if (!name || EXCLUDED_BASES.has(name) || !Number.isFinite(entry) || entry <= 0 || positions.some(x => x.name === name)) continue;
+          const old = oldMap.get(name) || {};
+          positions.push({
+            name,
+            entry,
+            createdAt: Number(item?.createdAt) || Number(old.createdAt) || Date.now(),
+            highWater: Math.max(entry, Number(item?.highWater) || 0, Number(old.highWater) || 0),
+            updatedAt: new Date().toISOString()
+          });
+        }
+        const next = { ...previous, positions, positionSource:'web-positions', updatedAt:new Date().toISOString() };
+        await saveState(env, next);
+        return json({ ok:true, positions:positions.map(x => ({name:x.name,entry:x.entry,highWater:x.highWater})), updatedAt:next.updatedAt });
+      }
+
       return json({ ok:false, error:'Not found' }, 404);
     } catch (e) {
       return json({ ok:false, error:String(e?.message || e) }, 500);
@@ -100,15 +127,17 @@ export default {
     const minute = t.getUTCMinutes();
     const hour = t.getUTCHours();
     const turkeyHour = (hour + 3) % 24;
-    // Önerilen Cron: */15 * * * *
-    // Her tetikte takip edilen coinlerde uygun pozisyon kontrolü.
-    // Saat başında saatlik özet; 4 saatte bir tam 32 coin taraması.
+    // Cronlar: */15 * * * * ve 1 */4 * * *
+    // Çeyrek saatlerde takip/pozisyon kontrolü, saat başında saatlik özet.
+    // UTC 00:01/04:01/... = Türkiye 03:01/07:01/... tam piyasa taraması.
+    const quarterHourly = minute % 15 === 0;
     const hourly = minute === 0;
-    const fourHourly = hourly && (turkeyHour % 4 === 0);
+    const fourHourly = minute === 1 && (turkeyHour % 4 === 3);
     ctx.waitUntil(backgroundCycle(env, {
       notify: true,
       source: 'cron',
       cron: controller.cron,
+      quarterHourly,
       hourly,
       fourHourly,
       scheduledAt: t.toISOString()
@@ -150,10 +179,12 @@ async function backgroundCycle(env, opts = {}) {
     tracked = sortByProfit(marketTop3).slice(0, TRACK_COUNT);
   }
 
-  const positionAlerts = opts.notify ? await buildPositionAlerts(env, previous.tracked || [], tracked) : [];
+  const marketAlerts = opts.notify && opts.quarterHourly ? await buildPositionAlerts(env, previous.tracked || [], tracked) : [];
+  const positionMonitor = await monitorActivePositions(env, previous.positions || [], Boolean(opts.notify));
+  const positionAlerts = [...marketAlerts, ...positionMonitor.alerts].slice(0, 6);
   if (positionAlerts.length) await sendOneSignal(env, positionAlerts);
 
-  if (opts.notify && tracked.length) { await sendQuarterHourSummary(env, tracked); }
+  if (opts.quarterHourly && opts.notify && tracked.length) { await sendQuarterHourSummary(env, tracked); }
 
   if (opts.hourly && opts.notify && tracked.length) {
     await sendHourlySummary(env, tracked);
@@ -167,10 +198,12 @@ async function backgroundCycle(env, opts = {}) {
     ...previous,
     tracked,
     marketTop3,
+    positions: positionMonitor.positions,
     source: opts.source || previous.source || 'cron',
     lastAlerts: positionAlerts,
     lastHourlyAt: opts.hourly ? (opts.scheduledAt || new Date().toISOString()) : (previous.lastHourlyAt || null),
     last4hScanAt: opts.fourHourly ? (opts.scheduledAt || new Date().toISOString()) : (previous.last4hScanAt || null),
+    lastPositionCheckAt: positionMonitor.positions.length ? (opts.scheduledAt || new Date().toISOString()) : (previous.lastPositionCheckAt || null),
     updatedAt: new Date().toISOString()
   };
   await saveState(env, state);
@@ -183,6 +216,8 @@ async function backgroundCycle(env, opts = {}) {
     tracked,
     marketTop3,
     alerts: positionAlerts,
+    activePositions: positionMonitor.positions,
+    quarterHourly: Boolean(opts.quarterHourly),
     hourly: Boolean(opts.hourly),
     fourHourly: Boolean(opts.fourHourly),
     updatedAt: state.updatedAt
@@ -284,6 +319,48 @@ async function buildPositionAlerts(env, prevList, nowList) {
   return allowed.slice(0, 4);
 }
 
+async function monitorActivePositions(env, savedPositions, notify) {
+  const positions = [], alerts = [];
+  for (const saved of (savedPositions || []).slice(0, TRACK_COUNT)) {
+    const name = cleanBase(saved?.name), entry = Number(saved?.entry);
+    if (!name || !Number.isFinite(entry) || entry <= 0) continue;
+    try {
+      const data = await analyzeCandidate(name, null, new Map());
+      const price = Number(data?.m?.price), stop = Number(data?.p?.stop), target = Number(data?.p?.t1);
+      if (!Number.isFinite(price) || price <= 0) continue;
+      const highWater = Math.max(entry, Number(saved.highWater) || 0, price);
+      const pnl = (price / entry - 1) * 100;
+      const pullback = highWater > 0 ? Math.max(0, (highWater - price) / highWater * 100) : 0;
+      const remaining = target > 0 ? (target - price) / price * 100 : NaN;
+      const current = {
+        ...saved,
+        name, entry, highWater, lastPrice:price, lastPnl:pnl, lastPullback:pullback,
+        stop:Number.isFinite(stop)?stop:null, target:Number.isFinite(target)?target:null,
+        checkedAt:new Date().toISOString()
+      };
+      positions.push(current);
+      if (!notify) continue;
+
+      let alert = null;
+      if (stop > 0 && price <= stop) {
+        alert = {type:'POSITION_STOP',name,title:`🔴 ${name}/TRY — STOP / RİSK`,body:`Fiyat ${fmtPrice(price)} • stop ${fmtPrice(stop)} • K/Z ${fmtPct(pnl)}. Uygulamayı açıp pozisyonu kontrol et.`};
+      } else if (pnl > 0 && pullback >= 3) {
+        alert = {type:'POSITION_GIVEBACK_3',name,title:`🔴 ${name}/TRY — KÂR GERİ VERME %${fmt2(pullback)}`,body:`Zirve ${fmtPrice(highWater)} • fiyat ${fmtPrice(price)} • K/Z ${fmtPct(pnl)}. Çıkış/koruma kararını kontrol et.`};
+      } else if (pnl >= 3 && pullback >= 2) {
+        alert = {type:'POSITION_GIVEBACK_2',name,title:`🟠 ${name}/TRY — KÂRI KORU`,body:`Zirveden geri çekilme %${fmt2(pullback)} • K/Z ${fmtPct(pnl)}. Akıllı Satış V2 kararını kontrol et.`};
+      } else if (Number.isFinite(remaining) && remaining <= 0) {
+        alert = {type:'POSITION_TARGET',name,title:`🎯 ${name}/TRY — TAHMİNİ DİRENÇ GELDİ`,body:`Fiyat ${fmtPrice(price)} • tahmini direnç ${fmtPrice(target)} • K/Z ${fmtPct(pnl)}.`};
+      } else if (Number.isFinite(remaining) && remaining <= 0.8) {
+        alert = {type:'POSITION_TARGET_NEAR',name,title:`🟡 ${name}/TRY — DİRENCE ÇOK YAKIN`,body:`Tahmini dirence %${fmt2(Math.max(0,remaining))} kaldı • K/Z ${fmtPct(pnl)}.`};
+      }
+      if (alert && await allowAlert(env, alert.type, name)) alerts.push(alert);
+    } catch (e) {
+      positions.push({ ...saved, name, entry, lastError:String(e?.message || e), checkedAt:new Date().toISOString() });
+    }
+  }
+  return { positions, alerts };
+}
+
 async function allowAlert(env, type, name) {
   if (!env.COIN_KV) return true;
   const key = `${ALERT_MEMORY_KEY}:${type}:${name}`;
@@ -357,10 +434,16 @@ async function scanMarket() {
 async function analyzeCandidate(name, t24, bookMap = new Map()) {
   const [a,b] = await Promise.all([klines(name,'15m'), klines(name,'1h')]);
   const m = calc(a), h = calc(b);
+  m.closedPrice = m.price;
 
   let ticker = t24;
   if (!ticker) {
     ticker = await ticker24(name).catch(() => ({}));
+  }
+  const currentPrice = num(ticker,'lastPrice','c','price');
+  if (currentPrice > 0) {
+    m.price = currentPrice;
+    m.change = (currentPrice / m.closedPrice - 1) * 100;
   }
 
   const qv = num(ticker,'quoteVolume','q','volumeQuote','quoteAssetVolume');
@@ -560,6 +643,14 @@ async function sendOneSignal(env,alerts){
   if(!env.ONESIGNAL_APP_ID || !env.ONESIGNAL_API_KEY)return;
   const title=alerts.length===1?alerts[0].title:'Coin Analiz — Takip Uyarısı';
   const body=alerts.length===1?alerts[0].body:alerts.map(a=>`${a.name}/TRY: ${a.body}`).join('\n');
+  const appUrl = new URL(env.APP_URL||'https://fatihhanfan-orhan.github.io/Coin-analiz/');
+  if(alerts.length===1 && alerts[0].name){
+    appUrl.searchParams.set('coin',cleanBase(alerts[0].name));
+    if(String(alerts[0].type||'').startsWith('POSITION_')){
+      appUrl.searchParams.set('position','1');
+      appUrl.hash='position-'+cleanBase(alerts[0].name);
+    }
+  }
 
   const r=await fetch('https://api.onesignal.com/notifications',{
     method:'POST',
@@ -570,7 +661,7 @@ async function sendOneSignal(env,alerts){
       included_segments:['Subscribed Users'],
       headings:{en:title},
       contents:{en:body},
-      url:env.APP_URL||'https://fatihhanfan-orhan.github.io/Coin-analiz/'
+      url:appUrl.href
     })
   });
   if(!r.ok)throw new Error(`OneSignal ${r.status}: ${await r.text()}`);
