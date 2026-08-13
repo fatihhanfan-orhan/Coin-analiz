@@ -1,10 +1,9 @@
 self.addEventListener('notificationclick', event => {
-  const target = event.notification?.data?.coinAnalizUrl;
-  if (!target) return;
   event.stopImmediatePropagation();
   event.notification.close();
   event.waitUntil((async () => {
     const safeBase = new URL('./', self.registration.scope);
+    const target = event.notification?.data?.coinAnalizUrl || event.notification?.data?.url || safeBase.href;
     const requested = new URL(target, safeBase);
     const destination = requested.origin === safeBase.origin && requested.pathname.startsWith(safeBase.pathname)
       ? requested.href

@@ -1110,6 +1110,7 @@ async function sendOneSignal(env,alerts){
       contents:{en:body},
       priority:critical?10:5,
       ttl:critical?60:900,
+      data:{coinAnalizUrl:appUrl.href,url:appUrl.href},
       url:appUrl.href
     })
   });
