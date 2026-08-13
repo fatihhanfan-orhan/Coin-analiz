@@ -485,7 +485,7 @@ function buildPositionRiskAlert({name, price, stop, target, entry, highWater, pn
   return null;
 }
 
-async function fetchBinanceTrBookMap(names, timeoutMs = 6500) {
+async function fetchBinanceTrBookMap(names, timeoutMs = 10000) {
   const cleanNames = normalizeNames(names).slice(0, TRACK_COUNT);
   if (!cleanNames.length) return {bookMap:new Map(), errors:[]};
 
@@ -506,9 +506,9 @@ async function fetchBinanceTrBookMap(names, timeoutMs = 6500) {
   return {bookMap, errors};
 }
 
-async function fetchBinanceTrBookTicker(name, timeoutMs = 6500) {
+async function fetchBinanceTrBookTicker(name, timeoutMs = 10000) {
   const clean = cleanBase(name);
-  const url = `https://stream-cloud.binance.tr/ws/${clean.toLowerCase()}try@bookTicker`;
+  const url = `https://stream-cloud.binance.tr/ws/${clean.toLowerCase()}try@depth5@100ms`;
   const response = await fetch(url, {headers:{Upgrade:'websocket'}});
   const socket = response.webSocket;
   if (!socket) throw new Error(`WebSocket bağlantısı reddedildi (HTTP ${response.status})`);
@@ -519,7 +519,8 @@ async function fetchBinanceTrBookTicker(name, timeoutMs = 6500) {
         try {
           const parsed = JSON.parse(String(event.data));
           const row = parsed?.data || parsed;
-          const bid = num(row,'bidPrice','b'), ask = num(row,'askPrice','a');
+          const bid = Number(row?.bids?.[0]?.[0] || row?.b?.[0]?.[0] || row?.bidPrice),
+                ask = Number(row?.asks?.[0]?.[0] || row?.a?.[0]?.[0] || row?.askPrice);
           if (!(bid > 0) || !(ask > 0)) throw new Error('BID/ASK alanı eksik');
           resolve({symbol:clean+'TRY', bidPrice:String(bid), askPrice:String(ask), b:String(bid), a:String(ask), source:'BINANCE_TR_WS'});
         } catch (error) { reject(error); }
