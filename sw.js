@@ -1,4 +1,4 @@
-const CACHE='coin-analiz-v500-12madde';
+const CACHE='coin-analiz-v500-13madde';
 const CORE=['./','./index.html','./manifest.webmanifest','./ikon-192.png','./ikon-512.png'];
 
 self.addEventListener('install',event=>{
