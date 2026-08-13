@@ -32,7 +32,7 @@ export default {
         return json({
           ok: true,
           service: 'Coin Analiz Worker V5.0 — 7/24 Bildirim',
-          version: '5.0-WORKER-15-DENETIMLI',
+          version: '5.0-WORKER-16-BILDIRIM-YOL-FIX',
           kvConfigured: Boolean(env.COIN_KV),
           oneSignalAppIdConfigured: Boolean(env.ONESIGNAL_APP_ID),
           oneSignalApiKeyConfigured: Boolean(env.ONESIGNAL_API_KEY),
