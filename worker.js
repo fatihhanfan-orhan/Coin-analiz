@@ -44,10 +44,11 @@ export default {
           last4hScanAt: state.last4hScanAt || null,
           last4hNotificationAt: state.last4hNotificationAt || null,
           last4hScanned: state.last4hScanned || null,
+          lastQuarterNotificationAt: state.lastQuarterNotificationAt || null,
           lastPositionCheckAt: state.lastPositionCheckAt || null,
           lastNotificationErrors: state.lastNotificationErrors || [],
           updatedAt: state.updatedAt || null,
-          recommendedCrons: ['*/15 * * * *', '1 */4 * * *', '2 */4 * * *']
+          recommendedCrons: ['*/15 * * * *', '2,17,32,47 * * * *', '1 */4 * * *', '3 */4 * * *']
         });
       }
 
@@ -131,20 +132,26 @@ export default {
     const minute = t.getUTCMinutes();
     const hour = t.getUTCHours();
     const turkeyHour = (hour + 3) % 24;
-    // Cronlar: */15 * * * *, 1 */4 * * * ve 2 */4 * * *
+    // Cronlar: */15 * * * *, 2,17,32,47 * * * *, 1 */4 * * * ve 3 */4 * * *
     // Çeyrek saatlerde takip/pozisyon kontrolü, saat başında saatlik özet.
     // UTC 00:01/04:01/... = Türkiye 03:01/07:01/... tam piyasa taraması;
-    // bir dakika sonra ayrı invocation yeni 4 saatlik sonucu OneSignal'a yollar.
+    // bildirimler hesaplamadan ayrı invocation'larda gönderilir.
     const quarterHourly = minute % 15 === 0;
     const hourly = minute === 0;
     const fourHourly = minute === 1 && (turkeyHour % 4 === 3);
-    const fourHourlySummary = minute === 2 && (turkeyHour % 4 === 3);
+    const quarterSummary = [2,17,32,47].includes(minute);
+    const fourHourlySummary = minute === 3 && (turkeyHour % 4 === 3);
     if (fourHourlySummary) {
       ctx.waitUntil(sendStoredFourHourSummary(env, t.toISOString()));
       return;
     }
+    if (quarterSummary) {
+      ctx.waitUntil(sendStoredQuarterSummary(env, t.toISOString()));
+      return;
+    }
     ctx.waitUntil(backgroundCycle(env, {
-      notify: !fourHourly,
+      notify: false,
+      collectAlerts: quarterHourly,
       source: 'cron',
       cron: controller.cron,
       quarterHourly,
@@ -212,13 +219,13 @@ async function backgroundCycle(env, opts = {}) {
     tracked = sortByProfit(marketTop3).slice(0, TRACK_COUNT);
   }
 
-  const marketAlerts = opts.notify && opts.quarterHourly ? await buildPositionAlerts(env, previous.tracked || [], tracked) : [];
+  const marketAlerts = opts.collectAlerts && opts.quarterHourly ? await buildPositionAlerts(env, previous.tracked || [], tracked) : [];
   // Ayrı 4 saatlik cron, bir dakika önceki çeyrek/saatlik cronda pozisyonları zaten kontrol etti.
   // Aynı ağır taramada yeniden kontrol etmek dış istek sınırını gereksiz yere tüketir.
   const skipPositionCheck = shouldFullScan;
   const positionMonitor = skipPositionCheck
     ? { positions: previous.positions || [], alerts: [] }
-    : await monitorActivePositions(env, previous.positions || [], Boolean(opts.notify), analysisByName, tickerMap, bookMap);
+    : await monitorActivePositions(env, previous.positions || [], Boolean(opts.collectAlerts), analysisByName, tickerMap, bookMap);
   const positionAlerts = [...marketAlerts, ...positionMonitor.alerts].slice(0, 6);
 
   const state = {
@@ -228,6 +235,7 @@ async function backgroundCycle(env, opts = {}) {
     positions: positionMonitor.positions,
     source: opts.source || previous.source || 'cron',
     lastAlerts: positionAlerts,
+    pendingAlerts: opts.collectAlerts ? positionAlerts : (previous.pendingAlerts || []),
     lastHourlyAt: opts.hourly ? (opts.scheduledAt || new Date().toISOString()) : (previous.lastHourlyAt || null),
     last4hScanAt: opts.fourHourly ? (opts.scheduledAt || new Date().toISOString()) : (previous.last4hScanAt || null),
     last4hScanned: opts.fourHourly ? (market?.scanned || 0) : (previous.last4hScanned || null),
@@ -449,6 +457,28 @@ async function sendFourHourScan(env, top3, scanned) {
   }]);
 }
 
+async function sendStoredQuarterSummary(env, scheduledAt) {
+  const state = await loadState(env);
+  const notificationErrors = [];
+  const notifySafely = async (label, fn) => {
+    try { await fn(); }
+    catch (e) { notificationErrors.push(`${label}: ${String(e?.message || e)}`); }
+  };
+  const alerts = Array.isArray(state.pendingAlerts) ? state.pendingAlerts.slice(0, 6) : [];
+  if (alerts.length) await notifySafely('position-alerts', () => sendOneSignal(env, alerts));
+  if ((state.tracked || []).length) await notifySafely('quarter-hour', () => sendQuarterHourSummary(env, state.tracked));
+  const hourlyAt = Date.parse(state.lastHourlyAt || '');
+  const scheduledMs = Date.parse(scheduledAt || '') || Date.now();
+  if (Number.isFinite(hourlyAt) && Math.abs(scheduledMs - hourlyAt) <= 5*60*1000 && (state.tracked || []).length) {
+    await notifySafely('hourly', () => sendHourlySummary(env, state.tracked));
+  }
+  state.pendingAlerts = [];
+  state.lastQuarterNotificationAt = scheduledAt || new Date().toISOString();
+  state.lastNotificationErrors = notificationErrors;
+  state.updatedAt = new Date().toISOString();
+  await saveState(env, state);
+}
+
 async function sendStoredFourHourSummary(env, scheduledAt) {
   const state = await loadState(env);
   try {
@@ -461,7 +491,6 @@ async function sendStoredFourHourSummary(env, scheduledAt) {
     state.lastNotificationErrors = [`four-hour-summary: ${String(e?.message || e)}`];
     state.updatedAt = new Date().toISOString();
     await saveState(env, state);
-    throw e;
   }
 }
 
