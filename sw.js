@@ -1,4 +1,4 @@
-const CACHE='coin-analiz-v500-15-denetimli';
+const CACHE='coin-analiz-v500-16-toplam-tutar';
 const CORE=['./','./index.html','./manifest.webmanifest','./ikon-192.png','./ikon-512.png'];
 
 self.addEventListener('install',event=>{
@@ -65,7 +65,7 @@ self.addEventListener('periodicsync',event=>{
         body:'Yeni 15 dakikalık kontrol zamanı. Güncel analiz için Coin Analiz’i açın.',
         icon:'./ikon-192.png',
         badge:'./ikon-192.png',
-        tag:'coin-periodic-v500-15',
+        tag:'coin-periodic-v500-16',
         data:{coinAnalizUrl:new URL('./',self.registration.scope).href}
       })
     );
