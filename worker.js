@@ -85,7 +85,7 @@ export default {
           try { analyzed.push(await analyzeCandidate(name, null, new Map())); }
           catch (e) { analyzed.push({ name, error: String(e?.message || e) }); }
         }
-        const good = analyzed.filter(x => !x.error);
+        const good = analyzed.filter(x => !('error' in x));
         if (!good.length) return json({ ok:false, error:'Takip için geçerli veri alınamadı.', details:analyzed }, 422);
 
         const previous = await loadState(env);
@@ -144,8 +144,7 @@ export default {
     // 1,16,31,46 * * * *     : yalnız başarısız/hâlâ gönderilmemiş çeyrek özetleri için 1 dk yedek.
     // 1 */4 * * * / 3 */4... : ağır 4 saatlik tarama ve iki dakika sonraki bilgi özeti.
     if (cron === '* * * * *') {
-      // Çeyrek dakikalarda ağır analiz zaten pozisyonları kontrol eder; çift alarm üretme.
-      if (minute % 15 !== 0) ctx.waitUntil(runFastPositionCycle(env, t.toISOString()));
+      ctx.waitUntil(runFastPositionCycle(env, t.toISOString()));
       return;
     }
     if (cron === '1,16,31,46 * * * *') {
@@ -248,7 +247,7 @@ async function backgroundCycle(env, opts = {}) {
   const skipPositionCheck = shouldFullScan;
   const positionMonitor = skipPositionCheck
     ? { positions: previous.positions || [], alerts: [] }
-    : await monitorActivePositions(env, previous.positions || [], Boolean(opts.collectAlerts), analysisByName, tickerMap, bookMap);
+    : await monitorActivePositions(env, previous.positions || [], false, analysisByName, tickerMap, bookMap);
   const positionAlerts = [...marketAlerts, ...positionMonitor.alerts].slice(0, 6);
 
   // Dakikalık pozisyon görevi ağır 4 saatlik taramayla eşzamanlı çalışabilir.
