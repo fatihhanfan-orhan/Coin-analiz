@@ -1,4 +1,4 @@
-// Coin Analiz V5.0 FINAL Worker — 15dk + 1saat gerçek arka plan push
+// Coin Analiz V5.0 FINAL Worker — hızlı pozisyon alarmı + 15dk/1saat arka plan push
 const BINANCE_API_BASES = [
   'https://data-api.binance.vision/api/v3',
   'https://api-gcp.binance.com/api/v3',
@@ -33,7 +33,7 @@ export default {
         return json({
           ok: true,
           service: 'Coin Analiz Worker V5.0 — 7/24 Bildirim',
-          version: '5.0-WORKER-12MADDE',
+          version: '5.0-WORKER-14-HIZLI-UYARI',
           kvConfigured: Boolean(env.COIN_KV),
           oneSignalAppIdConfigured: Boolean(env.ONESIGNAL_APP_ID),
           oneSignalApiKeyConfigured: Boolean(env.ONESIGNAL_API_KEY),
@@ -41,14 +41,18 @@ export default {
           marketTop3: (state.marketTop3 || []).map(x => x.name),
           activePositions: (state.positions || []).map(x => ({ name:x.name, entry:x.entry, highWater:x.highWater })),
           lastHourlyAt: state.lastHourlyAt || null,
+          lastHourlyNotificationAt: state.lastHourlyNotificationAt || null,
           last4hScanAt: state.last4hScanAt || null,
           last4hNotificationAt: state.last4hNotificationAt || null,
           last4hScanned: state.last4hScanned || null,
           lastQuarterNotificationAt: state.lastQuarterNotificationAt || null,
+          lastQuarterAnalysisAt: state.lastQuarterAnalysisAt || null,
           lastPositionCheckAt: state.lastPositionCheckAt || null,
+          lastFastPositionCheckAt: state.lastFastPositionCheckAt || null,
+          lastCriticalNotificationAt: state.lastCriticalNotificationAt || null,
           lastNotificationErrors: state.lastNotificationErrors || [],
           updatedAt: state.updatedAt || null,
-          recommendedCrons: ['*/15 * * * *', '2,17,32,47 * * * *', '1 */4 * * *', '3 */4 * * *']
+          recommendedCrons: ['* * * * *', '*/15 * * * *', '1,16,31,46 * * * *', '1 */4 * * *', '3 */4 * * *']
         });
       }
 
@@ -96,7 +100,7 @@ export default {
         return json({ ok:true, tracked: next.tracked, updatedAt: next.updatedAt });
       }
 
-      // Kullanıcının açık pozisyonlarını, uygulama arka plandayken de 15 dakikada bir izler.
+      // Kullanıcının açık pozisyonlarını uygulama arka plandayken dakikada bir izler.
       if (url.pathname === '/set-positions' && request.method === 'POST') {
         const body = await request.json().catch(() => ({}));
         const raw = Array.isArray(body.positions) ? body.positions : [];
@@ -109,6 +113,7 @@ export default {
           if (!name || EXCLUDED_BASES.has(name) || !Number.isFinite(entry) || entry <= 0 || positions.some(x => x.name === name)) continue;
           const old = oldMap.get(name) || {};
           positions.push({
+            ...old,
             name,
             entry,
             createdAt: Number(item?.createdAt) || Number(old.createdAt) || Date.now(),
@@ -132,31 +137,49 @@ export default {
     const minute = t.getUTCMinutes();
     const hour = t.getUTCHours();
     const turkeyHour = (hour + 3) % 24;
-    // Cronlar: */15 * * * *, 2,17,32,47 * * * *, 1 */4 * * * ve 3 */4 * * *
-    // Çeyrek saatlerde takip/pozisyon kontrolü, saat başında saatlik özet.
-    // UTC 00:01/04:01/... = Türkiye 03:01/07:01/... tam piyasa taraması;
-    // bildirimler hesaplamadan ayrı invocation'larda gönderilir.
-    const quarterHourly = minute % 15 === 0;
-    const hourly = minute === 0;
-    const fourHourly = minute === 1 && (turkeyHour % 4 === 3);
-    const quarterSummary = [2,17,32,47].includes(minute);
-    const fourHourlySummary = minute === 3 && (turkeyHour % 4 === 3);
-    if (fourHourlySummary) {
+    const cron = String(controller.cron || '');
+    // Cron görevleri controller.cron ile ayrılır; aynı dakikaya denk gelen görevler birbirine karışmaz.
+    // * * * * *              : kritik pozisyonları dakikada bir kontrol et, alarmı aynı invocation'da gönder.
+    // */15 * * * *           : 15 dk/1 saat hesabını yap, özeti hesap biter bitmez gönder.
+    // 1,16,31,46 * * * *     : yalnız başarısız/hâlâ gönderilmemiş çeyrek özetleri için 1 dk yedek.
+    // 1 */4 * * * / 3 */4... : ağır 4 saatlik tarama ve iki dakika sonraki bilgi özeti.
+    if (cron === '* * * * *') {
+      // Çeyrek dakikalarda ağır analiz zaten pozisyonları kontrol eder; çift alarm üretme.
+      if (minute % 15 !== 0) ctx.waitUntil(runFastPositionCycle(env, t.toISOString()));
+      return;
+    }
+    if (cron === '1,16,31,46 * * * *') {
+      ctx.waitUntil(sendStoredQuarterSummary(env, t.toISOString(), { fallbackOnly:true }));
+      return;
+    }
+    if (cron === '3 */4 * * *') {
       ctx.waitUntil(sendStoredFourHourSummary(env, t.toISOString()));
       return;
     }
-    if (quarterSummary) {
-      ctx.waitUntil(sendStoredQuarterSummary(env, t.toISOString()));
+    if (cron === '1 */4 * * *') {
+      ctx.waitUntil(backgroundCycle(env, {
+        notify: false,
+        collectAlerts: false,
+        source: 'cron-4h',
+        cron,
+        quarterHourly: false,
+        hourly: false,
+        fourHourly: minute === 1 && (turkeyHour % 4 === 3),
+        scheduledAt: t.toISOString()
+      }));
       return;
     }
+    const quarterHourly = cron === '*/15 * * * *';
+    if (!quarterHourly) return;
+    const hourly = minute === 0;
     ctx.waitUntil(backgroundCycle(env, {
-      notify: false,
-      collectAlerts: quarterHourly,
-      source: 'cron',
-      cron: controller.cron,
+      notify: true,
+      collectAlerts: true,
+      source: 'cron-quarter',
+      cron,
       quarterHourly,
       hourly,
-      fourHourly,
+      fourHourly: false,
       scheduledAt: t.toISOString()
     }));
   }
@@ -220,7 +243,7 @@ async function backgroundCycle(env, opts = {}) {
   }
 
   const marketAlerts = opts.collectAlerts && opts.quarterHourly ? await buildPositionAlerts(env, previous.tracked || [], tracked) : [];
-  // Ayrı 4 saatlik cron, bir dakika önceki çeyrek/saatlik cronda pozisyonları zaten kontrol etti.
+  // Ayrı 4 saatlik cron sırasında pozisyonları dakikalık hızlı görev izler.
   // Aynı ağır taramada yeniden kontrol etmek dış istek sınırını gereksiz yere tüketir.
   const skipPositionCheck = shouldFullScan;
   const positionMonitor = skipPositionCheck
@@ -228,14 +251,18 @@ async function backgroundCycle(env, opts = {}) {
     : await monitorActivePositions(env, previous.positions || [], Boolean(opts.collectAlerts), analysisByName, tickerMap, bookMap);
   const positionAlerts = [...marketAlerts, ...positionMonitor.alerts].slice(0, 6);
 
+  // Dakikalık pozisyon görevi ağır 4 saatlik taramayla eşzamanlı çalışabilir.
+  // Ağır tarama biterken daha yeni high-water/pozisyon bilgisini geriye döndürme.
+  const latestBeforeSave = skipPositionCheck ? await loadState(env) : previous;
   const state = {
-    ...previous,
+    ...latestBeforeSave,
     tracked,
     marketTop3,
-    positions: positionMonitor.positions,
+    positions: skipPositionCheck ? (latestBeforeSave.positions || []) : positionMonitor.positions,
     source: opts.source || previous.source || 'cron',
     lastAlerts: positionAlerts,
     pendingAlerts: opts.collectAlerts ? positionAlerts : (previous.pendingAlerts || []),
+    lastQuarterAnalysisAt: opts.quarterHourly ? (opts.scheduledAt || new Date().toISOString()) : (previous.lastQuarterAnalysisAt || null),
     lastHourlyAt: opts.hourly ? (opts.scheduledAt || new Date().toISOString()) : (previous.lastHourlyAt || null),
     last4hScanAt: opts.fourHourly ? (opts.scheduledAt || new Date().toISOString()) : (previous.last4hScanAt || null),
     last4hScanned: opts.fourHourly ? (market?.scanned || 0) : (previous.last4hScanned || null),
@@ -248,14 +275,38 @@ async function backgroundCycle(env, opts = {}) {
 
   const notificationErrors = [];
   const notifySafely = async (label, fn) => {
-    try { await fn(); }
-    catch (e) { notificationErrors.push(`${label}: ${String(e?.message || e)}`); }
+    try { await fn(); return true; }
+    catch (e) { notificationErrors.push(`${label}: ${String(e?.message || e)}`); return false; }
   };
-  if (positionAlerts.length) await notifySafely('position-alerts', () => sendOneSignal(env, positionAlerts));
-  if (opts.quarterHourly && opts.notify && tracked.length) await notifySafely('quarter-hour', () => sendQuarterHourSummary(env, tracked));
-  if (opts.hourly && opts.notify && tracked.length) await notifySafely('hourly', () => sendHourlySummary(env, tracked));
+  let notificationStateChanged = false;
+  if (positionAlerts.length) {
+    const sent = await notifySafely('position-alerts', () => sendOneSignal(env, positionAlerts));
+    if (sent) {
+      state.pendingAlerts = [];
+      const criticalAlerts = positionAlerts.filter(x => String(x?.type || '').startsWith('POSITION_'));
+      for (const alert of criticalAlerts) await markAlertSent(env, alert.type, alert.name);
+      if (criticalAlerts.length) {
+        state.lastCriticalNotificationAt = new Date().toISOString();
+      }
+      notificationStateChanged = true;
+    }
+  }
+  if (opts.quarterHourly && opts.notify && tracked.length) {
+    const sent = await notifySafely('quarter-hour', () => sendQuarterHourSummary(env, tracked));
+    if (sent) {
+      state.lastQuarterNotificationAt = new Date().toISOString();
+      notificationStateChanged = true;
+    }
+  }
+  if (opts.hourly && opts.notify && tracked.length) {
+    const sent = await notifySafely('hourly', () => sendHourlySummary(env, tracked));
+    if (sent) {
+      state.lastHourlyNotificationAt = new Date().toISOString();
+      notificationStateChanged = true;
+    }
+  }
   if (opts.fourHourly && opts.notify && marketTop3.length) await notifySafely('four-hour', () => sendFourHourScan(env, marketTop3, market?.scanned || 0));
-  if (notificationErrors.length) {
+  if (notificationErrors.length || notificationStateChanged) {
     state.lastNotificationErrors = notificationErrors;
     state.updatedAt = new Date().toISOString();
     await saveState(env, state);
@@ -398,19 +449,8 @@ async function monitorActivePositions(env, savedPositions, notify, analysisByNam
       positions.push(current);
       if (!notify) continue;
 
-      let alert = null;
-      if (stop > 0 && price <= stop) {
-        alert = {type:'POSITION_STOP',name,title:`🔴 ${name}/TRY — STOP / RİSK`,body:`Fiyat ${fmtPrice(price)} • stop ${fmtPrice(stop)} • K/Z ${fmtPct(pnl)}. Uygulamayı açıp pozisyonu kontrol et.`};
-      } else if (pnl > 0 && pullback >= 3) {
-        alert = {type:'POSITION_GIVEBACK_3',name,title:`🔴 ${name}/TRY — KÂR GERİ VERME %${fmt2(pullback)}`,body:`Zirve ${fmtPrice(highWater)} • fiyat ${fmtPrice(price)} • K/Z ${fmtPct(pnl)}. Çıkış/koruma kararını kontrol et.`};
-      } else if (pnl >= 3 && pullback >= 2) {
-        alert = {type:'POSITION_GIVEBACK_2',name,title:`🟠 ${name}/TRY — KÂRI KORU`,body:`Zirveden geri çekilme %${fmt2(pullback)} • K/Z ${fmtPct(pnl)}. Akıllı Satış V2 kararını kontrol et.`};
-      } else if (Number.isFinite(remaining) && remaining <= 0) {
-        alert = {type:'POSITION_TARGET',name,title:`🎯 ${name}/TRY — TAHMİNİ DİRENÇ GELDİ`,body:`Fiyat ${fmtPrice(price)} • tahmini direnç ${fmtPrice(target)} • K/Z ${fmtPct(pnl)}.`};
-      } else if (Number.isFinite(remaining) && remaining <= 0.8) {
-        alert = {type:'POSITION_TARGET_NEAR',name,title:`🟡 ${name}/TRY — DİRENCE ÇOK YAKIN`,body:`Tahmini dirence %${fmt2(Math.max(0,remaining))} kaldı • K/Z ${fmtPct(pnl)}.`};
-      }
-      if (alert && await allowAlert(env, alert.type, name)) alerts.push(alert);
+      const alert = buildPositionRiskAlert({name, price, stop, target, entry, highWater, pnl, pullback, remaining});
+      if (alert && await alertAllowed(env, alert.type, name)) alerts.push(alert);
     } catch (e) {
       positions.push({ ...saved, name, entry, lastError:String(e?.message || e), checkedAt:new Date().toISOString() });
     }
@@ -418,13 +458,130 @@ async function monitorActivePositions(env, savedPositions, notify, analysisByNam
   return { positions, alerts };
 }
 
-async function allowAlert(env, type, name) {
+function buildPositionRiskAlert({name, price, stop, target, entry, highWater, pnl, pullback, remaining}) {
+  if (stop > 0 && price <= stop) {
+    return {type:'POSITION_STOP',name,title:`🔴 ${name}/TRY — STOP / RİSK`,body:`Fiyat ${fmtPrice(price)} • stop ${fmtPrice(stop)} • K/Z ${fmtPct(pnl)}. Uygulamayı açıp pozisyonu kontrol et.`};
+  }
+  if (pnl > 0 && pullback >= 3) {
+    return {type:'POSITION_GIVEBACK_3',name,title:`🔴 ${name}/TRY — KÂR GERİ VERME %${fmt2(pullback)}`,body:`Zirve ${fmtPrice(highWater)} • fiyat ${fmtPrice(price)} • K/Z ${fmtPct(pnl)}. Çıkış/koruma kararını kontrol et.`};
+  }
+  if (pnl >= 3 && pullback >= 2) {
+    return {type:'POSITION_GIVEBACK_2',name,title:`🟠 ${name}/TRY — KÂRI KORU`,body:`Zirveden geri çekilme %${fmt2(pullback)} • K/Z ${fmtPct(pnl)}. Akıllı Satış V2 kararını kontrol et.`};
+  }
+  if (Number.isFinite(remaining) && remaining <= 0) {
+    return {type:'POSITION_TARGET',name,title:`🎯 ${name}/TRY — TAHMİNİ DİRENÇ GELDİ`,body:`Fiyat ${fmtPrice(price)} • tahmini direnç ${fmtPrice(target)} • K/Z ${fmtPct(pnl)}.`};
+  }
+  if (Number.isFinite(remaining) && remaining <= 0.8) {
+    return {type:'POSITION_TARGET_NEAR',name,title:`🟡 ${name}/TRY — DİRENCE ÇOK YAKIN`,body:`Tahmini dirence %${fmt2(Math.max(0,remaining))} kaldı • K/Z ${fmtPct(pnl)}.`};
+  }
+  return null;
+}
+
+async function runFastPositionCycle(env, scheduledAt) {
+  const previous = await loadState(env);
+  const savedPositions = (previous.positions || []).slice(0, TRACK_COUNT);
+  if (!savedPositions.length) return {ok:true, checked:0, alerts:0};
+
+  const books = await allBookTickers();
+  const bookMap = new Map(books.map(x => [String(x.symbol || x.s || ''), x]));
+  const checked = [];
+  const alerts = [];
+
+  for (const saved of savedPositions) {
+    const name = cleanBase(saved?.name), entry = Number(saved?.entry);
+    if (!name || !Number.isFinite(entry) || entry <= 0) continue;
+    try {
+      const book = bookMap.get(name+'TRY') || bookMap.get(name+'_TRY') || {};
+      const price = num(book,'bidPrice','b');
+      if (!Number.isFinite(price) || price <= 0) throw new Error('canlı BID alınamadı');
+
+      let stop = Number(saved.stop), target = Number(saved.target);
+      if (!(stop > 0) || !(target > 0)) {
+        const initialized = await analyzeCandidate(name, null, bookMap);
+        stop = Number(initialized?.p?.stop);
+        target = Number(initialized?.p?.t1);
+      }
+
+      const highWater = Math.max(entry, Number(saved.highWater) || 0, price);
+      const pnl = (price / entry - 1) * 100;
+      const pullback = highWater > 0 ? Math.max(0, (highWater - price) / highWater * 100) : 0;
+      const remaining = target > 0 ? (target - price) / price * 100 : NaN;
+      const current = {
+        ...saved,
+        name, entry, highWater, lastPrice:price, lastPnl:pnl, lastPullback:pullback,
+        stop:Number.isFinite(stop)?stop:null, target:Number.isFinite(target)?target:null,
+        checkedAt:new Date().toISOString(), fastCheckedAt:scheduledAt || new Date().toISOString()
+      };
+      delete current.lastError;
+      checked.push(current);
+
+      const alert = buildPositionRiskAlert({name, price, stop, target, entry, highWater, pnl, pullback, remaining});
+      if (alert && await alertAllowed(env, alert.type, name)) alerts.push(alert);
+    } catch (e) {
+      checked.push({ ...saved, name, entry, lastError:String(e?.message || e), fastCheckedAt:scheduledAt || new Date().toISOString() });
+    }
+  }
+
+  // Kullanıcı bu sırada pozisyon eklemiş/silmiş olabilir; yalnız hâlâ mevcut kayıtları güncelle.
+  const latest = await loadState(env);
+  const checkedMap = new Map(checked.map(x => [cleanBase(x.name), x]));
+  const positions = (latest.positions || []).slice(0, TRACK_COUNT).map(pos => {
+    const fresh = checkedMap.get(cleanBase(pos.name));
+    if (!fresh) return pos;
+    const entry = Number(pos.entry) || Number(fresh.entry);
+    return {
+      ...pos,
+      ...fresh,
+      entry,
+      createdAt:Number(pos.createdAt) || Number(fresh.createdAt) || Date.now(),
+      highWater:Math.max(entry, Number(pos.highWater)||0, Number(fresh.highWater)||0)
+    };
+  });
+  const state = {
+    ...latest,
+    positions,
+    lastPositionCheckAt:scheduledAt || new Date().toISOString(),
+    lastFastPositionCheckAt:scheduledAt || new Date().toISOString(),
+    lastFastPositionAlerts:alerts,
+    updatedAt:new Date().toISOString()
+  };
+  await saveState(env, state);
+
+  if (alerts.length) {
+    try {
+      await sendOneSignal(env, alerts);
+      for (const alert of alerts) await markAlertSent(env, alert.type, alert.name);
+      const newest = await loadState(env);
+      newest.lastCriticalNotificationAt = new Date().toISOString();
+      newest.lastNotificationErrors = [];
+      newest.updatedAt = new Date().toISOString();
+      await saveState(env, newest);
+    } catch (e) {
+      const newest = await loadState(env);
+      newest.lastNotificationErrors = [`fast-position-alerts: ${String(e?.message || e)}`];
+      newest.updatedAt = new Date().toISOString();
+      await saveState(env, newest);
+    }
+  }
+  return {ok:true, checked:positions.length, alerts:alerts.length};
+}
+
+async function alertAllowed(env, type, name) {
   if (!env.COIN_KV) return true;
   const key = `${ALERT_MEMORY_KEY}:${type}:${name}`;
-  const now = Date.now();
   const last = Number(await env.COIN_KV.get(key) || 0);
-  if (last && now-last < POSITION_COOLDOWN_MS) return false;
-  await env.COIN_KV.put(key, String(now), { expirationTtl: 6*60*60 });
+  return !(last && Date.now()-last < POSITION_COOLDOWN_MS);
+}
+
+async function markAlertSent(env, type, name) {
+  if (!env.COIN_KV) return;
+  const key = `${ALERT_MEMORY_KEY}:${type}:${name}`;
+  await env.COIN_KV.put(key, String(Date.now()), { expirationTtl: 6*60*60 });
+}
+
+async function allowAlert(env, type, name) {
+  if (!await alertAllowed(env, type, name)) return false;
+  await markAlertSent(env, type, name);
   return true;
 }
 
@@ -457,26 +614,54 @@ async function sendFourHourScan(env, top3, scanned) {
   }]);
 }
 
-async function sendStoredQuarterSummary(env, scheduledAt) {
+async function sendStoredQuarterSummary(env, scheduledAt, opts = {}) {
   const state = await loadState(env);
   const notificationErrors = [];
   const notifySafely = async (label, fn) => {
-    try { await fn(); }
-    catch (e) { notificationErrors.push(`${label}: ${String(e?.message || e)}`); }
+    try { await fn(); return true; }
+    catch (e) { notificationErrors.push(`${label}: ${String(e?.message || e)}`); return false; }
   };
-  const alerts = Array.isArray(state.pendingAlerts) ? state.pendingAlerts.slice(0, 6) : [];
-  if (alerts.length) await notifySafely('position-alerts', () => sendOneSignal(env, alerts));
-  if ((state.tracked || []).length) await notifySafely('quarter-hour', () => sendQuarterHourSummary(env, state.tracked));
+  const analysisMs = Date.parse(state.lastQuarterAnalysisAt || '');
+  const quarterSentMs = Date.parse(state.lastQuarterNotificationAt || '');
   const hourlyAt = Date.parse(state.lastHourlyAt || '');
+  const hourlySentMs = Date.parse(state.lastHourlyNotificationAt || '');
   const scheduledMs = Date.parse(scheduledAt || '') || Date.now();
-  if (Number.isFinite(hourlyAt) && Math.abs(scheduledMs - hourlyAt) <= 5*60*1000 && (state.tracked || []).length) {
-    await notifySafely('hourly', () => sendHourlySummary(env, state.tracked));
+  const alerts = Array.isArray(state.pendingAlerts) ? state.pendingAlerts.slice(0, 6) : [];
+  const quarterDue = Number.isFinite(analysisMs) && (!Number.isFinite(quarterSentMs) || quarterSentMs < analysisMs);
+  const hourlyDue = Number.isFinite(hourlyAt) && (!Number.isFinite(hourlySentMs) || hourlySentMs < hourlyAt) && Math.abs(scheduledMs-hourlyAt) <= 5*60*1000;
+  if (opts.fallbackOnly && !alerts.length && !quarterDue && !hourlyDue) return {ok:true, skipped:true};
+
+  let pendingAlerts = alerts;
+  let lastQuarterNotificationAt = state.lastQuarterNotificationAt || null;
+  let lastHourlyNotificationAt = state.lastHourlyNotificationAt || null;
+  if (alerts.length) {
+    const sent = await notifySafely('position-alerts', () => sendOneSignal(env, alerts));
+    if (sent) {
+      pendingAlerts = [];
+      for (const alert of alerts.filter(x => String(x?.type || '').startsWith('POSITION_'))) {
+        await markAlertSent(env, alert.type, alert.name);
+      }
+    }
   }
-  state.pendingAlerts = [];
-  state.lastQuarterNotificationAt = scheduledAt || new Date().toISOString();
-  state.lastNotificationErrors = notificationErrors;
-  state.updatedAt = new Date().toISOString();
-  await saveState(env, state);
+  if (quarterDue && (state.tracked || []).length) {
+    const sent = await notifySafely('quarter-hour', () => sendQuarterHourSummary(env, state.tracked));
+    if (sent) lastQuarterNotificationAt = scheduledAt || new Date().toISOString();
+  }
+  if (hourlyDue && (state.tracked || []).length) {
+    const sent = await notifySafely('hourly', () => sendHourlySummary(env, state.tracked));
+    if (sent) lastHourlyNotificationAt = scheduledAt || new Date().toISOString();
+  }
+  const latest = await loadState(env);
+  const next = {
+    ...latest,
+    pendingAlerts,
+    lastQuarterNotificationAt,
+    lastHourlyNotificationAt,
+    lastNotificationErrors:notificationErrors,
+    updatedAt:new Date().toISOString()
+  };
+  await saveState(env, next);
+  return {ok:!notificationErrors.length, skipped:false, errors:notificationErrors};
 }
 
 async function sendStoredFourHourSummary(env, scheduledAt) {
@@ -738,6 +923,7 @@ async function sendOneSignal(env,alerts){
   if(!env.ONESIGNAL_APP_ID || !env.ONESIGNAL_API_KEY)return;
   const title=alerts.length===1?alerts[0].title:'Coin Analiz — Takip Uyarısı';
   const body=alerts.length===1?alerts[0].body:alerts.map(a=>`${a.name}/TRY: ${a.body}`).join('\n');
+  const critical=alerts.some(a=>String(a?.type||'').startsWith('POSITION_'));
   const appUrl = new URL(env.APP_URL||'https://fatihhanfan-orhan.github.io/Coin-analiz/');
   if(alerts.length===1 && alerts[0].name){
     appUrl.searchParams.set('coin',cleanBase(alerts[0].name));
@@ -756,6 +942,8 @@ async function sendOneSignal(env,alerts){
       included_segments:['Subscribed Users'],
       headings:{en:title},
       contents:{en:body},
+      priority:critical?10:5,
+      ttl:critical?60:900,
       url:appUrl.href
     })
   });
