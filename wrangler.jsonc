@@ -4,7 +4,7 @@
   "main": "worker.js",
   "compatibility_date": "2026-08-12",
   "triggers": {
-    "crons": ["* * * * *", "*/15 * * * *", "1,16,31,46 * * * *", "1 */4 * * *", "3 */4 * * *"]
+    "crons": ["* * * * *"]
   },
   "kv_namespaces": [
     {

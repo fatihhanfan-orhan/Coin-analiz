@@ -1,7 +1,7 @@
 {
   "name": "Coin Analiz V5.0",
   "short_name": "Coin Analiz",
-  "description": "Coin Analiz V5.0 — canlı pozisyon ve Akıllı Satış V2",
+  "description": "Coin Analiz V5.0 — Binance TR day-trade karar desteği, canlı pozisyon ve denetimli kâr koruma",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

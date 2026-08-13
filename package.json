@@ -3,6 +3,8 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
+    "check": "node --preserve-symlinks-main scripts/check.mjs",
+    "test": "node --preserve-symlinks-main --test tests/worker.test.mjs tests/app-static.test.mjs",
     "deploy": "wrangler deploy"
   },
   "devDependencies": {
