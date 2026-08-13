@@ -42,10 +42,12 @@ export default {
           activePositions: (state.positions || []).map(x => ({ name:x.name, entry:x.entry, highWater:x.highWater })),
           lastHourlyAt: state.lastHourlyAt || null,
           last4hScanAt: state.last4hScanAt || null,
+          last4hNotificationAt: state.last4hNotificationAt || null,
+          last4hScanned: state.last4hScanned || null,
           lastPositionCheckAt: state.lastPositionCheckAt || null,
           lastNotificationErrors: state.lastNotificationErrors || [],
           updatedAt: state.updatedAt || null,
-          recommendedCrons: ['*/15 * * * *', '1 */4 * * *']
+          recommendedCrons: ['*/15 * * * *', '1 */4 * * *', '2 */4 * * *']
         });
       }
 
@@ -129,14 +131,20 @@ export default {
     const minute = t.getUTCMinutes();
     const hour = t.getUTCHours();
     const turkeyHour = (hour + 3) % 24;
-    // Cronlar: */15 * * * * ve 1 */4 * * *
+    // Cronlar: */15 * * * *, 1 */4 * * * ve 2 */4 * * *
     // Çeyrek saatlerde takip/pozisyon kontrolü, saat başında saatlik özet.
-    // UTC 00:01/04:01/... = Türkiye 03:01/07:01/... tam piyasa taraması.
+    // UTC 00:01/04:01/... = Türkiye 03:01/07:01/... tam piyasa taraması;
+    // bir dakika sonra ayrı invocation yeni 4 saatlik sonucu OneSignal'a yollar.
     const quarterHourly = minute % 15 === 0;
     const hourly = minute === 0;
     const fourHourly = minute === 1 && (turkeyHour % 4 === 3);
+    const fourHourlySummary = minute === 2 && (turkeyHour % 4 === 3);
+    if (fourHourlySummary) {
+      ctx.waitUntil(sendStoredFourHourSummary(env, t.toISOString()));
+      return;
+    }
     ctx.waitUntil(backgroundCycle(env, {
-      notify: true,
+      notify: !fourHourly,
       source: 'cron',
       cron: controller.cron,
       quarterHourly,
@@ -222,6 +230,7 @@ async function backgroundCycle(env, opts = {}) {
     lastAlerts: positionAlerts,
     lastHourlyAt: opts.hourly ? (opts.scheduledAt || new Date().toISOString()) : (previous.lastHourlyAt || null),
     last4hScanAt: opts.fourHourly ? (opts.scheduledAt || new Date().toISOString()) : (previous.last4hScanAt || null),
+    last4hScanned: opts.fourHourly ? (market?.scanned || 0) : (previous.last4hScanned || null),
     lastPositionCheckAt: !skipPositionCheck && positionMonitor.positions.length ? (opts.scheduledAt || new Date().toISOString()) : (previous.lastPositionCheckAt || null),
     lastNotificationErrors: [],
     updatedAt: new Date().toISOString()
@@ -438,6 +447,22 @@ async function sendFourHourScan(env, top3, scanned) {
     title:'🔎 4 Saatlik Yeni Coin Taraması',
     body:`${scanned || TOP_N} coin tarandı • ${body}`
   }]);
+}
+
+async function sendStoredFourHourSummary(env, scheduledAt) {
+  const state = await loadState(env);
+  try {
+    await sendFourHourScan(env, state.marketTop3 || [], state.last4hScanned || TOP_N);
+    state.last4hNotificationAt = scheduledAt || new Date().toISOString();
+    state.lastNotificationErrors = [];
+    state.updatedAt = new Date().toISOString();
+    await saveState(env, state);
+  } catch (e) {
+    state.lastNotificationErrors = [`four-hour-summary: ${String(e?.message || e)}`];
+    state.updatedAt = new Date().toISOString();
+    await saveState(env, state);
+    throw e;
+  }
 }
 
 async function scanMarket() {
