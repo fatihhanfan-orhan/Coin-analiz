@@ -12,7 +12,7 @@ const BINANCE_24H_URLS = BINANCE_API_BASES.map(base => `${base}/ticker/24hr`);
 const BINANCE_BOOK_URLS = BINANCE_API_BASES.map(base => `${base}/ticker/bookTicker`);
 
 // Cloudflare'ın tek invocation dış istek sınırında pozisyon kontrolü ve OneSignal için pay bırak.
-const TOP_N = 18;
+const TOP_N = 16;
 const TRACK_COUNT = 3;
 const STATE_KEY = 'coin-analiz-state-v2';
 const ALERT_MEMORY_KEY = 'coin-analiz-alert-memory-v1';
@@ -183,6 +183,7 @@ async function backgroundCycle(env, opts = {}) {
     if (!name) continue;
     try {
       const cached = analysisByName.get(name);
+      if (shouldFullScan && !cached) continue;
       const ticker = tickerMap.get(name+'TRY') || tickerMap.get(name+'_TRY') || null;
       const analyzed = cached || await analyzeCandidate(name, ticker, bookMap);
       currentTracked.push(analyzed);
@@ -195,6 +196,10 @@ async function backgroundCycle(env, opts = {}) {
   if (currentTracked.length) {
     // Web sayfasının seçtiği coinleri değiştirme; sadece kâr potansiyeline göre sırala.
     tracked = sortByProfit(currentTracked).slice(0, TRACK_COUNT);
+    for (const candidate of marketTop3) {
+      if (tracked.length >= TRACK_COUNT) break;
+      if (!tracked.some(x => x.name === candidate.name)) tracked.push(candidate);
+    }
   } else {
     tracked = sortByProfit(marketTop3).slice(0, TRACK_COUNT);
   }
@@ -202,7 +207,7 @@ async function backgroundCycle(env, opts = {}) {
   const marketAlerts = opts.notify && opts.quarterHourly ? await buildPositionAlerts(env, previous.tracked || [], tracked) : [];
   // Ayrı 4 saatlik cron, bir dakika önceki çeyrek/saatlik cronda pozisyonları zaten kontrol etti.
   // Aynı ağır taramada yeniden kontrol etmek dış istek sınırını gereksiz yere tüketir.
-  const skipPositionCheck = Boolean(opts.fourHourly && !opts.quarterHourly);
+  const skipPositionCheck = shouldFullScan;
   const positionMonitor = skipPositionCheck
     ? { positions: previous.positions || [], alerts: [] }
     : await monitorActivePositions(env, previous.positions || [], Boolean(opts.notify), analysisByName, tickerMap, bookMap);
@@ -243,6 +248,7 @@ async function backgroundCycle(env, opts = {}) {
     ok: true,
     mode: shouldFullScan ? 'full-scan' : 'tracked-check',
     scanned: market?.scanned || 0,
+    analyzed: market?.metrics?.length || 0,
     valid: market ? market.metrics.filter(x => x.rpot?.eligible).length : null,
     tracked,
     marketTop3,
@@ -371,6 +377,7 @@ async function monitorActivePositions(env, savedPositions, notify, analysisByNam
         stop:Number.isFinite(stop)?stop:null, target:Number.isFinite(target)?target:null,
         checkedAt:new Date().toISOString()
       };
+      delete current.lastError;
       positions.push(current);
       if (!notify) continue;
 
