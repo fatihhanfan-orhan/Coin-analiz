@@ -2,10 +2,14 @@
 <html lang="tr">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Coin Analiz V5.1 Test yükleniyor</title></head>
 <body><script>
-/* V5.1 test: çalışan ana uygulamayı aynı origin içinde yükleyip patch uygular. */
+/* V5.1 test: çalışan ana uygulamayı aynı origin içinde yükleyip test yamalarını uygular. */
 fetch('./index.html?v=500',{cache:'no-store'}).then(r=>r.text()).then(async html=>{
- const patch=await fetch('./v5.1-ab-patch.js?v=ab1',{cache:'no-store'}).then(r=>r.text());
- html=html.replace('</body>',`<script>${patch.replace(/<\/script/gi,'<\\/script')}<\/script></body>`);
+ const [ab,filter]=await Promise.all([
+  fetch('./v5.1-ab-patch.js?v=ab1',{cache:'no-store'}).then(r=>r.text()),
+  fetch('./v5.1-islem-adayi-filter.js?v=1',{cache:'no-store'}).then(r=>r.text())
+ ]);
+ const patches=ab+'\n'+filter;
+ html=html.replace('</body>',`<script>${patches.replace(/<\/script/gi,'<\\/script')}<\/script></body>`);
  document.open();document.write(html);document.close();
 }).catch(e=>{document.body.textContent='V5.1 test yüklenemedi: '+e.message});
 </script></body></html>
