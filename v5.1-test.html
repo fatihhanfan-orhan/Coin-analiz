@@ -5,7 +5,7 @@
 fetch('./index.html?v=500',{cache:'no-store'}).then(r=>r.text()).then(async html=>{
  const [ab,filter]=await Promise.all([
   fetch('./v5.1-ab-patch.js?v=ab1',{cache:'no-store'}).then(r=>r.text()),
-  fetch('./v5.1-islem-adayi-filter.js?v=2',{cache:'no-store'}).then(r=>r.text())
+  fetch('./v5.1-islem-adayi-filter.js?v=3',{cache:'no-store'}).then(r=>r.text())
  ]);
  const patches=ab+'\n'+filter;
  html=html.replace('</body>',`<script>${patches.replace(/<\/script/gi,'<\\/script')}<\/script></body>`);
