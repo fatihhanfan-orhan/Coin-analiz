@@ -11,156 +11,25 @@ html,body{margin:0;width:100%;height:100%;background:#08111f;overflow:hidden}
 </style>
 </head>
 <body>
-<iframe id="app" src="./index.html?v=510-ab"></iframe>
+<iframe id="app" src="./index.html?v=511-freeze-fix"></iframe>
 <div id="beta">V5.1 TEST • A+B</div>
 <script>
 const frame=document.getElementById('app');
 frame.addEventListener('load',()=>{
-  const w=frame.contentWindow,d=frame.contentDocument;
-  if(!w||!d)return;
-
-  // PAKET B — okunabilirlik / daha ekonomik alan kullanımı
-  const style=d.createElement('style');
-  style.textContent=`
-  @media(max-width:720px){
-    body{padding:7px!important}.card,.manualBox,.positionBox{padding:11px!important}
-    .coin-title{font-size:22px!important}.price{font-size:29px!important}.chg{font-size:15px!important}
-    .metric b,.planbox b,.liveBox b,.posMetric b{font-size:11px!important}.metric span,.planbox span,.liveBox span,.posMetric span{font-size:14px!important}
-    .sub,.tiny,.quickBuyNote,.note{font-size:12px!important;line-height:1.4!important}
-    .manualTitle,.positionTitle,.sectionTitle{font-size:20px!important}.manualSub{font-size:13px!important}
-    .manualRow input{font-size:20px!important;padding:14px!important}.manualRow button{font-size:16px!important}
-    .decision{font-size:25px!important}.score{font-size:31px!important}.scorelabel{font-size:11px!important}
-    .why{font-size:13px!important}.whyicon{width:13px!important;flex-basis:13px!important;font-size:10px!important}
-    .liveStrip{grid-template-columns:1fr 1fr!important}.planrow{grid-template-columns:1fr 1fr!important}
-    .posPnl{font-size:24px!important}.posName{font-size:20px!important}
-  }
-  @media(max-width:430px){.flowGrid,.posMetrics{grid-template-columns:1fr 1fr!important}.planrow{grid-template-columns:1fr 1fr!important}}
-  .refLine{display:block;margin-top:3px;color:#91a2b8;font-size:.84em;font-weight:650;line-height:1.25}
-  .miniLamp{font-size:9px;vertical-align:1px;margin-right:4px}
-  .spreadGood{color:#31d158}.spreadMid{color:#ffbf2f}.spreadBad{color:#ff666d}
-  .idx100{margin-top:6px;padding:7px 9px;border-radius:9px;background:#101f31;border:1px solid #29435f;font-size:13px;font-weight:900}
-  `;
-  d.head.appendChild(style);
-
-  // Terimler — mevcut plan fonksiyonunu bozmadan görünür metinleri sadeleştir.
-  if(typeof w.planUI==='function'){
-    const oldPlan=w.planUI;
-    w.planUI=function(p,m,h){
-      return oldPlan(p,m,h)
-       .replace('FİYAT / BÖLGE MESAFESİ','DESTEĞE MESAFE')
-       .replace('STOP REFERANSI','STOP FİYATI')
-       .replace('HEDEF 1 / HEDEF 2','DİRENÇ 1 / DİRENÇ 2')
-       .replace('RİSK / KAZANÇ (H1)','RİSK 1 → KAZANÇ')
-       .replace(/<span>1\s*:\s*([^<]+)<\/span>/,'<span>1 → $1</span>');
-    };
-  }
-
-  // RSI / MACD ham değerleri referans + sonuç mantığıyla göster.
-  if(typeof w.metric==='function'){
-    const oldMetric=w.metric;
-    w.metric=function(n,v){
-      let html=oldMetric(n,v),num=parseFloat(String(v).replace(/\./g,'').replace(',','.'));
-      if(n==='RSI 14'&&Number.isFinite(num)){
-        const s=num<30?'AŞIRI SATIM':num<50?'ZAYIF / NÖTR':num<=70?'NÖTR / GÜÇLÜ':'AŞIRI ALIM';
-        html=html.replace('</span>',` → ${s}<small class="refLine">&lt;30 Aşırı Satım • 30–70 Normal • &gt;70 Aşırı Alım</small></span>`);
-      }
-      if(n==='MACD Hist'){
-        const x=parseFloat(String(v).replace(',','.')),s=Number.isFinite(x)?(x<0?'NEGATİF':'POZİTİF'):'—';
-        html=html.replace('</span>',` → ${s}<small class="refLine">NEGATİF &lt; 0 &gt; POZİTİF</small></span>`);
-      }
-      return html;
-    };
-  }
-
-  // NEDEN satırlarında küçük trafik lambaları.
-  if(typeof w.reasonRows==='function'){
-    const oldReasons=w.reasonRows;
-    w.reasonRows=function(m,h,s){
-      return oldReasons(m,h,s)
-       .replaceAll('✅','<span class="miniLamp">🟢</span>')
-       .replaceAll('⚠️','<span class="miniLamp">🟡</span>');
-    };
-  }
-
-  // PAKET A — tek coin de ortak canlı WS havuzuna girsin.
-  let manualLiveCoin='';
-  if(typeof w.activeCoinNames==='function'){
-    const oldActive=w.activeCoinNames;
-    w.activeCoinNames=function(){
-      return [...new Set([...(oldActive()||[]),manualLiveCoin].filter(Boolean))];
-    };
-  }
-
-  function cleanupManualButtons(){
-    const box=d.getElementById('manualResult');if(!box)return;
-    [...box.children].forEach(el=>{
-      if(el.tagName==='BUTTON'&&!el.classList.contains('quickBuyBtn'))el.remove();
-    });
-    box.querySelectorAll('button').forEach(b=>{if(b.textContent.trim()==='AL')b.remove()});
-    const qb=box.querySelector('.quickBuyBtn');
-    if(qb&&!qb.disabled&&!/BU FİYATTAN ALDIM/.test(qb.textContent))qb.textContent='✅ BU FİYATTAN ALDIM';
-  }
-
-  if(typeof w.runManualCoin==='function'){
-    const oldManual=w.runManualCoin;
-    const patchedManual=async function(){
-      const inp=d.getElementById('manualCoin');
-      manualLiveCoin=String(inp?.value||'').trim().toUpperCase().replace(/\/?TRY$/,'').replace(/[^A-Z0-9]/g,'');
-      const result=await oldManual();
-      cleanupManualButtons();
-      if(manualLiveCoin){
-        try{w.startMarketWS?.();w.fetchPositionDepthSnapshot?.(manualLiveCoin)}catch{}
-        setTimeout(()=>{cleanupManualButtons();try{w.startMarketWS?.();w.fetchPositionDepthSnapshot?.(manualLiveCoin)}catch{}},350);
-      }
-      return result;
-    };
-    w.runManualCoin=patchedManual;
-    const btn=d.getElementById('manualRun');if(btn)btn.onclick=patchedManual;
-    const inp=d.getElementById('manualCoin');
-    if(inp)inp.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();e.stopImmediatePropagation();patchedManual()}},true);
-  }
-
-  // Spread’i anlamlandır: değer + uygunluk + maliyet etkisi.
-  if(typeof w.updateLiveDom==='function'){
-    const oldUpdate=w.updateLiveDom;
-    w.updateLiveDom=function(name,patch={}){
-      const r=oldUpdate(name,patch),sid=String(name).replace(/[^A-Z0-9]/g,''),bid=Number(patch.bid),ask=Number(patch.ask);
-      if(bid>0&&ask>0){
-        const sp=(ask-bid)/((ask+bid)/2)*100,e=d.getElementById('spread_'+sid);
-        if(e){
-          const cls=sp<=.20?'spreadGood':sp<=.35?'spreadMid':'spreadBad',txt=sp<=.20?'UYGUN':sp<=.35?'SINIRDA':'YÜKSEK';
-          e.className=cls;e.innerHTML=`%${sp.toFixed(3)} • ${txt}<small class="refLine">SPREAD (Alış–Satış Farkı) • maliyet ≈ −%${sp.toFixed(3)}</small>`;
-        }
-      }
-      cleanupManualButtons();
-      return r;
-    };
-  }
-
-  // Binance TR Android uygulamasını dene; olmazsa resmi web adresine düş.
-  d.addEventListener('click',e=>{
-    const a=e.target.closest?.('.tradeBtn');if(!a)return;
-    const web=a.href;if(!/Android/i.test(navigator.userAgent))return;
-    e.preventDefault();
-    const u=new URL(web),intent=`intent://${u.host}${u.pathname}${u.search}#Intent;scheme=https;package=com.cloud.tr;S.browser_fallback_url=${encodeURIComponent(web)};end`;
-    frame.contentWindow.location.href=intent;
-  },true);
-
-  // Aktif pozisyonda 100 bazlı performansı görünür kıl.
-  function addIndex100(){
-    d.querySelectorAll('.posCard').forEach(card=>{
-      const pnl=card.querySelector('[id^="posPnlValue_"]');if(!pnl)return;
-      let x=parseFloat(pnl.textContent.replace('%','').replace(',','.'));if(!Number.isFinite(x))return;
-      let box=card.querySelector('.idx100');if(!box){box=d.createElement('div');box.className='idx100';card.querySelector('.posHead')?.after(box)}
-      box.textContent=`100 BAZLI PERFORMANS: ${(100*(1+x/100)).toFixed(2)} • K/Z ${(x>=0?'+':'')+x.toFixed(2)}%`;
-    });
-  }
-  const ob=new MutationObserver(()=>{cleanupManualButtons();addIndex100()});
-  ob.observe(d.body,{subtree:true,childList:true,characterData:true});
-  addIndex100();cleanupManualButtons();
-
-  // Tek coin giriş alanını görünür tut.
-  const mi=d.getElementById('manualCoin');if(mi){mi.placeholder='Coin kodu yaz • Örn: HEMI';mi.setAttribute('aria-label','Coin kodu')}
+ const w=frame.contentWindow,d=frame.contentDocument;if(!w||!d)return;
+ const style=d.createElement('style');style.textContent=`
+ @media(max-width:720px){body{padding:7px!important}.card,.manualBox,.positionBox{padding:11px!important}.coin-title{font-size:22px!important}.price{font-size:29px!important}.chg{font-size:15px!important}.metric b,.planbox b,.liveBox b,.posMetric b{font-size:11px!important}.metric span,.planbox span,.liveBox span,.posMetric span{font-size:14px!important}.sub,.tiny,.quickBuyNote,.note{font-size:12px!important;line-height:1.4!important}.manualTitle,.positionTitle,.sectionTitle{font-size:20px!important}.manualSub{font-size:13px!important}.manualRow input{font-size:20px!important;padding:14px!important}.manualRow button{font-size:16px!important}.decision{font-size:25px!important}.score{font-size:31px!important}.scorelabel{font-size:11px!important}.why{font-size:13px!important}.liveStrip,.planrow{grid-template-columns:1fr 1fr!important}.posPnl{font-size:24px!important}.posName{font-size:20px!important}}
+ .refLine{display:block;margin-top:3px;color:#91a2b8;font-size:.84em;font-weight:650;line-height:1.25}.spreadGood{color:#31d158}.spreadMid{color:#ffbf2f}.spreadBad{color:#ff666d}.idx100{margin-top:6px;padding:7px 9px;border-radius:9px;background:#101f31;border:1px solid #29435f;font-size:13px;font-weight:900}`;d.head.appendChild(style);
+ if(typeof w.planUI==='function'){const f=w.planUI;w.planUI=(p,m,h)=>f(p,m,h).replace('FİYAT / BÖLGE MESAFESİ','DESTEĞE MESAFE').replace('STOP REFERANSI','STOP FİYATI').replace('HEDEF 1 / HEDEF 2','DİRENÇ 1 / DİRENÇ 2').replace('RİSK / KAZANÇ (H1)','RİSK 1 → KAZANÇ');}
+ if(typeof w.metric==='function'){const f=w.metric;w.metric=(n,v)=>{let h=f(n,v),x=parseFloat(String(v).replace(',','.'));if(n==='RSI 14'&&Number.isFinite(x)){let s=x<30?'AŞIRI SATIM':x<50?'ZAYIF / NÖTR':x<=70?'NÖTR / GÜÇLÜ':'AŞIRI ALIM';h=h.replace('</span>',` → ${s}<small class="refLine">&lt;30 Aşırı Satım • 30–70 Normal • &gt;70 Aşırı Alım</small></span>`)}if(n==='MACD Hist'&&Number.isFinite(x))h=h.replace('</span>',` → ${x<0?'NEGATİF':'POZİTİF'}<small class="refLine">NEGATİF &lt; 0 &gt; POZİTİF</small></span>`);return h}}
+ let manual='';if(typeof w.activeCoinNames==='function'){const f=w.activeCoinNames;w.activeCoinNames=()=>[...new Set([...(f()||[]),manual].filter(Boolean))]}
+ function clean(){const b=d.getElementById('manualResult');if(!b)return;b.querySelectorAll('button').forEach(x=>{if(x.textContent.trim()==='AL')x.remove()});const q=b.querySelector('.quickBuyBtn');if(q&&!q.disabled)q.textContent='✅ BU FİYATTAN ALDIM'}
+ if(typeof w.runManualCoin==='function'){const f=w.runManualCoin;const run=async()=>{manual=String(d.getElementById('manualCoin')?.value||'').trim().toUpperCase().replace(/\/?TRY$/,'').replace(/[^A-Z0-9]/g,'');let r=await f();clean();try{w.startMarketWS?.();w.fetchPositionDepthSnapshot?.(manual)}catch{}return r};w.runManualCoin=run;const b=d.getElementById('manualRun');if(b)b.onclick=run}
+ if(typeof w.updateLiveDom==='function'){const f=w.updateLiveDom;w.updateLiveDom=(name,p={})=>{let r=f(name,p),bid=Number(p.bid),ask=Number(p.ask),id=String(name).replace(/[^A-Z0-9]/g,'');if(bid>0&&ask>0){let sp=(ask-bid)/((ask+bid)/2)*100,e=d.getElementById('spread_'+id);if(e){let c=sp<=.20?'spreadGood':sp<=.35?'spreadMid':'spreadBad',t=sp<=.20?'UYGUN':sp<=.35?'SINIRDA':'YÜKSEK';e.className=c;e.innerHTML=`%${sp.toFixed(3)} • ${t}<small class="refLine">Alış–Satış Farkı • maliyet ≈ −%${sp.toFixed(3)}</small>`}}clean();return r}}
+ function index100(){d.querySelectorAll('.posCard').forEach(c=>{let p=c.querySelector('[id^="posPnlValue_"]');if(!p)return,x=parseFloat(p.textContent.replace('%','').replace(',','.'));if(!Number.isFinite(x))return;let b=c.querySelector('.idx100');if(!b){b=d.createElement('div');b.className='idx100';c.querySelector('.posHead')?.after(b)}const txt=`100 BAZLI PERFORMANS: ${(100*(1+x/100)).toFixed(2)} • K/Z ${(x>=0?'+':'')+x.toFixed(2)}%`;if(b.textContent!==txt)b.textContent=txt})}
+ // Önceki sürümde MutationObserver kendi DOM değişikliklerini tekrar tetikleyerek tarayıcıyı kilitliyordu. Kontrollü aralık kullanıyoruz.
+ setInterval(()=>{clean();index100()},1500);clean();index100();
+ const mi=d.getElementById('manualCoin');if(mi){mi.placeholder='Coin kodu yaz • Örn: HEMI';mi.setAttribute('aria-label','Coin kodu')}
 });
 </script>
 </body>
