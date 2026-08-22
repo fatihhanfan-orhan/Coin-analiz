@@ -580,7 +580,7 @@ async function runManualCoin(){
     ?`<div class="modeBanner">ALINDI — TAKİPTE • ALDIM, NE ZAMAN SATAYIM?</div><button class="manualLifecycleAction" style="margin-top:10px;background:#7f1d1d" onclick="removePosition('${active.id}')">SATTIM / POZİSYONU KAPAT</button>`
     :`<div class="modeBanner" style="background:#17345a;color:#d8e9ff">ALIM MODU • ALAYIM MI?</div><button class="manualLifecycleAction" style="margin-top:10px;background:#0f8f3b" onclick="quickAddPosition('${n}',this)">✅ CANLI ASK İLE ALDIM</button>`;
    box.innerHTML=lifecycle+card(n,data,null)+warn;
-   compactManualResult(box);
+   compactManualResult(box,!!active);
    input.value='';
  }catch(e){
    box.innerHTML=`<div class="coin badborder"><div class="coin-title">${n}/TRY</div><div class="err">Veri alınamadı: ${e.message}</div></div>`;
@@ -642,8 +642,9 @@ function syncManualLifecycle(name){
  else{banner.textContent='ALIM MODU • ALAYIM MI?';banner.style.cssText='background:#17345a;color:#d8e9ff';action.textContent='✅ CANLI ASK İLE ALDIM';action.style.background='#0f8f3b';action.onclick=()=>quickAddPosition(clean,action)}
 }
 
-function compactManualResult(box){
+function compactManualResult(box,positionMode=false){
  const coin=box?.querySelector('.coin');if(!coin)return;
+ if(positionMode)for(const el of coin.querySelectorAll(':scope > .quickBuyBtn,:scope > .quickBuyNote,:scope > .decision,:scope > .supportScore'))el.remove();
  const details=document.createElement('details');details.className='technicalDetails';
  const summary=document.createElement('summary');summary.textContent='TEKNİK AYRINTILAR';details.appendChild(summary);
  for(const el of [...coin.querySelectorAll(':scope > .whybtn,:scope > .why,:scope > .scores,:scope > .section')])details.appendChild(el);
