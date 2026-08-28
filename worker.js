@@ -831,8 +831,27 @@ async function scanMarket() {
   return { scanned: top.length, metrics, tickerMap, bookMap };
 }
 
+function klineNetFlow(rows,count){const a=(rows||[]).slice(-count),quote=a.reduce((s,x)=>s+(+x[7]||0),0),buy=a.reduce((s,x)=>s+(+x[10]||0),0);return{status:quote>0?'REAL':'VERİ YOK',net:quote>0?buy-(quote-buy):NaN,quote};}
+function flowPercentile(a,p){if(!a.length)return NaN;const s=[...a].sort((x,y)=>x-y);return s[Math.min(s.length-1,Math.floor((s.length-1)*p))];}
+function aggregateOrderFlow(rows,now=Date.now()){const trades=(Array.isArray(rows)?rows:[]).map(x=>({time:+(x.T??x.time),quote:(+x.p||0)*(+x.q||0),side:x.m?'SELL':'BUY'})).filter(x=>x.time>0&&x.quote>0),sizes=trades.map(x=>x.quote),mediumCut=flowPercentile(sizes,.75),largeCut=flowPercentile(sizes,.95),start=now-60*60e3;if(!trades.length||!Number.isFinite(mediumCut)||Math.min(...trades.map(x=>x.time))>start)return{status:'VERİ YOK',large:NaN,medium:NaN,small:NaN};const out={status:'REAL',large:0,medium:0,small:0,thresholds:{medium:mediumCut,large:largeCut}};for(const t of trades.filter(x=>x.time>=start)){const k=t.quote>=largeCut?'large':t.quote>=mediumCut?'medium':'small';out[k]+=(t.side==='BUY'?1:-1)*t.quote;}return out;}
+async function fetchOrderFlow(name){try{const clean=cleanBase(name),j=await fetchJsonAny([`https://api.binance.me/api/v3/aggTrades?symbol=${clean}TRY&limit=1000`,`https://cloudme-tr.2meta.app/api/v1/aggTrades?symbol=${clean}TRY&limit=1000`]);return aggregateOrderFlow(unwrapArray(j));}catch{return{status:'VERİ YOK',large:NaN,medium:NaN,small:NaN};}}
+function buildFlowContext(k15,orders,m){const m15=klineNetFlow(k15,1),m30=klineNetFlow(k15,2),h1=klineNetFlow(k15,4),distribution=Number(m?.price)>Number(m?.closedPrice)&&m15.status==='REAL'&&m15.net<0;return{status:[m15,m30,h1].every(x=>x.status==='REAL')?'REAL':'VERİ YOK',m15,m30,h1,orders,distribution};}
+function recoveryProfit(price,target){return price>0&&target>price?(target/price-1)*100:NaN;}
+function uniqueLevels(values){return [...new Set(values.filter(Number.isFinite).filter(x=>x>0).map(x=>+x.toPrecision(12)))].sort((a,b)=>a-b);}
+function enrichRecoveryPlan(p,k15,k1h,k4h,k1d,m,h,flow,spread){
+  const price=Number(m.price),daily=(k1d||[]).slice(-8),dailyHighs=daily.map(x=>+x[2]);
+  const res=uniqueLevels([p.t1,p.t2,...swingLevels(k15,'high',2,120),...swingLevels(k1h,'high',2,160),...swingLevels(k4h||[],'high',2,120),...swingLevels(k1d||[],'high',1,120),...dailyHighs]).filter(x=>x>price*1.002);
+  p.resistances=res;p.t1=res[0]??p.t1;p.t2=res[1]??NaN;p.t3=res[2]??NaN;p.hasResistance=Number.isFinite(p.t1);p.rr=p.hasResistance&&p.entry>p.stop?(p.t1-p.entry)/(p.entry-p.stop):NaN;
+  const drops={};for(const days of [3,5,7]){const w=daily.slice(-days),peak=Math.max(...w.map(x=>+x[2]).filter(Number.isFinite));drops['d'+days]=peak>0?(price/peak-1)*100:NaN;}
+  const priorPeak=Math.max(...dailyHighs.filter(Number.isFinite)),maxRecoveryPct=recoveryProfit(price,priorPeak),lows15=swingLevels(k15,'low',2,80),higherLow=lows15.length>=2&&lows15.at(-1)>lows15.at(-2)*1.001;
+  const closes4h=(k4h||[]).slice(-3).map(x=>+x[4]),lows4h=(k4h||[]).slice(-3).map(x=>+x[3]),fourHourHold=closes4h.length>=2&&closes4h.at(-1)>=closes4h.at(-2),fourHourFalling=closes4h.length===3&&closes4h[2]<closes4h[1]&&closes4h[1]<closes4h[0]&&lows4h[2]<=lows4h[1];
+  const lastDailyLow=+daily.at(-1)?.[3],previousDailyLows=daily.slice(0,-1).map(x=>+x[3]).filter(Number.isFinite),newLow=previousDailyLows.length&&lastDailyLow<=Math.min(...previousDailyLows),recent15=(k15||[]).slice(-4),range15=recent15.length?Math.max(...recent15.map(x=>+x[2]))-Math.min(...recent15.map(x=>+x[3])):Infinity,base=range15<=Math.max(Number(p.atr)||0,price*.012),reclaim=Number(m.price)>=Number(p.support)&&Number(m.lastLow)<Number(p.support),volume=Number(m.vol)>=Number(m.vma5),money=flow?.m15?.status==='REAL'&&flow.m15.net>0&&!flow.distribution,rsi=Number(m.rsi6)>=Number(m.rsi12)&&Number(m.rsi)>=35,kdj=Number(m.kdjK)>Number(m.kdjD),ema=Number(m.ema9)>=Number(m.ema21),macd=Number(m.hist)>Number(m.prevHist),boll=Number(m.price)>=Number(m.bollDn),spreadOk=Number(spread)<=.35;
+  const confirmations=[higherLow,base,reclaim,fourHourHold,volume,money,rsi,kdj,ema,macd,boll,spreadOk].filter(Boolean).length,stabilized=!newLow&&!fourHourFalling&&(higherLow||base||reclaim),state=newLow?'YENİ DİP — AL YOK':fourHourFalling?'DÜŞÜŞ SÜRÜYOR — AL YOK':stabilized&&confirmations>=7?'TOPARLANMA TEYİDİ':stabilized?'YATAY / İZLE':'DÜŞÜŞ SÜRÜYOR — AL YOK';
+  p.recovery={drops,higherLow,base,reclaim,fourHourHold,fourHourFalling,newLow,confirmations,state,nearTarget:p.t1,mainTarget:p.t2||p.t1,maxRecoveryLevel:priorPeak,maxRecoveryPct,guaranteed:false};return p;
+}
+
 async function analyzeCandidate(name, t24, bookMap = new Map()) {
-  const [a,b] = await Promise.all([klines(name,'15m'), klines(name,'1h')]);
+  const [a,b,k4h,daily,orders] = await Promise.all([klines(name,'15m'), klines(name,'1h'), klines(name,'4h'), klines(name,'1d'), fetchOrderFlow(name)]);
   const m = calc(a), h = calc(b);
   m.closedPrice = m.price;
 
@@ -857,8 +876,8 @@ async function analyzeCandidate(name, t24, bookMap = new Map()) {
   const impulse = m.vma10 ? m.vma5/m.vma10 : 0;
   const vola = volatility15(a);
   const trend = (m.ema9>m.ema21?1:0)+(h.ema9>h.ema21?1:0)+(m.macd>m.signal?1:0)+(m.hist>m.prevHist?1:0);
-  const p = tradePlan(a,b,m,h);
-  const out = { name,qv,ch,spread,vRatio,impulse,vola,trend,buy:score(m,h,p).buy,m,h,p };
+  const flow=buildFlowContext(a,orders,m),p = enrichRecoveryPlan(tradePlan(a,b,m,h),a,b,k4h,daily,m,h,flow,spread);
+  const fastMode=vRatio>=1.8&&Math.abs((m.price/m.closedPrice-1)*100)>=Math.max(.8,vola*.7),out = { name,qv,marketCap:NaN,marketCapStatus:'VERİ YOK',ch,spread,vRatio,impulse,vola,fastMode,trend,buy:score(m,h,p).buy,m,h,p,flow };
   out.rpot = resistancePotential(out);
   return out;
 }
@@ -892,12 +911,13 @@ function assignCandidateScores(metrics) {
     const chasePenalty=d>3?Math.min(30,(d-3)*5):0;
     const belowPenalty=d<-1.5?10:0;
     const overheat=x.m.rsi>72?8:0;
-    x.candidate=Math.max(0,Math.min(100,profitPts+reachPts+supportPts+momentumPts+liquidPts-chasePenalty-belowPenalty-overheat));
+    const recovery=x.p?.recovery||{},recoveryBonus=recovery.state==='TOPARLANMA TEYİDİ'?Math.min(4,Number(recovery.confirmations||0)*.45):0,recoveryPenalty=recovery.newLow?20:0,theoreticalBonus=Math.min(2,Math.max(0,Number(recovery.maxRecoveryPct||0))*.03);
+    x.candidate=Math.max(0,Math.min(100,profitPts+reachPts+supportPts+momentumPts+liquidPts+recoveryBonus+theoreticalBonus-chasePenalty-belowPenalty-overheat-recoveryPenalty));
   }
 }
 
 function compareCandidate(a,b) {
-  return (Number(b?.candidate||0)-Number(a?.candidate||0)) || (Number(b?.rpot?.upside1||0)-Number(a?.rpot?.upside1||0));
+  return (Number(b?.rpot?.expectedEdge||0)-Number(a?.rpot?.expectedEdge||0)) || (Number(b?.candidate||0)-Number(a?.candidate||0)) || (Number(b?.rpot?.upside1||0)-Number(a?.rpot?.upside1||0));
 }
 
 function resistancePotential(x){
@@ -997,7 +1017,7 @@ function calc(k){
 }
 
 function closedKlines(rows,interval){
-  const ms=interval==='15m'?15*60*1000:60*60*1000, now=Date.now();
+  const ms=interval==='15m'?15*60*1000:interval==='1h'?60*60*1000:interval==='4h'?4*60*60*1000:24*60*60*1000, now=Date.now();
   return rows.filter(x=>{const open=+x[0], close=Number.isFinite(+x[6])?+x[6]:open+ms-1;return close<now-1500});
 }
 
@@ -1138,7 +1158,7 @@ function normalizeSyncedAnalyses(rows, allowedNames = []) {
     if (!name || (allowed.size && !allowed.has(name)) || result.some(x => x.name === name)) continue;
     const p = row?.p || {}, rpot = row?.rpot || {};
     const buy = clampNumber(row?.buy, 0, 10, NaN);
-    const stop = Number(p.stop), t1 = Number(p.t1), t2 = Number(p.t2);
+    const stop = Number(p.stop), t1 = Number(p.t1), t2 = Number(p.t2), t3=Number(p.t3);
     if (!Number.isFinite(buy) || !(stop > 0) || !(t1 > 0)) continue;
     result.push({
       name,
@@ -1150,7 +1170,8 @@ function normalizeSyncedAnalyses(rows, allowedNames = []) {
         status:String(p.status || '').slice(0,120),
         dist:clampNumber(p.dist,-1000,1000,99),
         near:Boolean(p.near), bounce:Boolean(p.bounce), hasResistance:Boolean(p.hasResistance),
-        stop, t1, t2:Number.isFinite(t2)&&t2>0?t2:t1,
+        stop, t1, t2:Number.isFinite(t2)&&t2>0?t2:t1,t3:Number.isFinite(t3)&&t3>0?t3:null,
+        recovery:p.recovery?{state:String(p.recovery.state||''),confirmations:Number(p.recovery.confirmations)||0,newLow:Boolean(p.recovery.newLow),maxRecoveryPct:clampNumber(p.recovery.maxRecoveryPct,-1000,1000,0),guaranteed:false}:null,
         rr:clampNumber(p.rr,0,100,0)
       },
       rpot:{
