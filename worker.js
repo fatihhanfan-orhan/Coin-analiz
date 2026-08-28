@@ -367,19 +367,21 @@ async function buildPositionAlerts(env, prevList, nowList) {
     const buy = Number(x.buy || 0);
     const upside = Number(x.rpot?.upside1 || 0);
     const price = Number(x.m?.price || 0);
-    const t1 = Number(x.p?.t1 || 0);
+    const t1 = Number(x.p?.mainTarget || x.p?.t2 || x.p?.t1 || 0);
     const targetRemaining = (price>0 && t1>0) ? ((t1-price)/price*100) : 99;
-    const buyReady = Boolean(x.p?.bounce) && buy >= 7.0;
+    const buyReady = Boolean(x.p?.bounce) && Number(x.p?.marketRR)>=1.30 && buy >= 7.0 && !hardGateReason(x);
+    const conditionalReady = candidateState(x)==='CONDITIONAL';
     const nearSupport = d >= -0.20 && d <= 0.80;
     const targetNear = targetRemaining >= 0 && targetRemaining <= 1.0;
     const targetHit = price>0 && t1>0 && price >= t1;
 
     const prevD = Number(p?.p?.dist ?? 99);
     const prevBuy = Number(p?.buy || 0);
-    const prevBuyReady = Boolean(p?.p?.bounce) && prevBuy >= 7.0;
+    const prevBuyReady = Boolean(p?.p?.bounce) && Number(p?.p?.marketRR)>=1.30 && prevBuy >= 7.0;
+    const prevConditionalReady = p ? (p.state==='CONDITIONAL'||candidateState(p)==='CONDITIONAL') : false;
     const prevNear = prevD >= -0.20 && prevD <= 0.80;
     const prevPrice = Number(p?.m?.price || 0);
-    const prevT1 = Number(p?.p?.t1 || 0);
+    const prevT1 = Number(p?.p?.mainTarget || p?.p?.t2 || p?.p?.t1 || 0);
     const prevRemain = (prevPrice>0 && prevT1>0) ? ((prevT1-prevPrice)/prevPrice*100) : 99;
 
     if (!p) {
@@ -387,7 +389,10 @@ async function buildPositionAlerts(env, prevList, nowList) {
       continue;
     }
     if (buyReady && !prevBuyReady) {
-      candidates.push({type:'BUY_READY',name:x.name,title:`🎯 ${x.name}/TRY — TEYİTLİ GİRİŞ`,body:`AL ${fmt1(buy)}/10 • kâr potansiyeli +${fmt2(upside)}% • desteğe ${fmtPct(d)} • R/K 1:${fmt2(x.p?.rr)}`});
+      candidates.push({type:'BUY_READY',name:x.name,title:`🎯 ${x.name}/TRY — TEYİTLİ PİYASA GİRİŞİ`,body:`AL ${fmt1(buy)}/10 • desteğe ${fmtPct(d)} • piyasa R/K 1:${fmt2(x.p?.marketRR)}`});
+    }
+    if (conditionalReady && !prevConditionalReady) {
+      candidates.push({type:'CONDITIONAL_READY',name:x.name,title:`🟡 ${x.name}/TRY — KOŞULLU GİRİŞ HAZIR`,body:`Şimdi piyasa girişi değil • limit ${fmtPrice(x.p?.conditionalEntry)} • stop ${fmtPrice(x.p?.stop)} • koşullu R/K 1:${fmt2(x.p?.conditionalRR)}`});
     }
     if (nearSupport && !prevNear) {
       candidates.push({type:'SUPPORT_NEAR',name:x.name,title:`🔔 ${x.name}/TRY alım bölgesinde`,body:`Desteğe ${fmtPct(d)} • AL ${fmt1(buy)}/10 • kâr potansiyeli +${fmt2(upside)}% • teyit ${x.p?.bounce?'VAR':'BEKLENİYOR'}`});
@@ -837,11 +842,11 @@ function validTryPairs(tickers,books){
 }
 
 function hardGateReason(x){
-  const p=x?.p||{},f=x?.flow||{},entry=Number(p.earlyEntry||p.entry),stop=Number(p.stop),rr=Number(p.rr),spread=Number(x?.spread),out=f.status==='REAL'&&f.m15?.net<0&&f.m30?.net<0&&f.h1?.net<0&&Math.abs(f.m15.net)*2>Math.abs(f.m30.net);
-  if(!p.hasResistance)return 'HEDEF_YOK';if(!(spread>=0&&spread<=.35))return 'SPREAD_LIKIDITE';if(!(stop>0&&stop<entry))return 'STOP_YOK';if(rr<1.30)return 'RR';if(p.recovery?.confirmedSupportBreak)return 'DESTEK_KIRILDI';if(out||f.distribution)return 'PARA_CIKISI';return '';
+  const p=x?.p||{},f=x?.flow||{},marketEntry=Number(p.marketEntry||x?.m?.price),conditionalEntry=Number(p.conditionalEntry),stop=Number(p.stop),marketRR=Number(p.marketRR),conditionalRR=Number(p.conditionalRR),spread=Number(x?.spread),out=f.status==='REAL'&&f.m15?.net<0&&f.m30?.net<0&&f.h1?.net<0&&Math.abs(f.m15.net)*2>Math.abs(f.m30.net);
+  if(!p.hasResistance)return 'HEDEF_YOK';if(!(spread>=0&&spread<=.35))return 'SPREAD_LIKIDITE';if(!(stop>0&&stop<marketEntry))return 'STOP_YOK';if(p.recovery?.confirmedSupportBreak)return 'DESTEK_KIRILDI';if(out||f.distribution)return 'PARA_CIKISI';if(Number(p.dist)>3.5||Number(x?.m?.rsi)>78)return 'GEC_KALINDI';if(!(marketRR>=1.30)&&!(conditionalEntry<marketEntry&&conditionalRR>=1.30))return 'RR';return '';
 }
-function candidateState(x){if(hardGateReason(x))return 'REJECT';const p=x.p||{},m=x.m||{},rec=p.recovery||{},hold=!rec.confirmedSupportBreak&&!rec.fourHourFalling&&(rec.higherLow||rec.base||rec.reclaim||Number(p.dist)<0),momentum=[m.hist>m.prevHist,m.kdjK>m.kdjD,m.price>m.lastOpen,m.rsi6>=m.rsi12].filter(Boolean).length;if(p.bounce&&hold&&Number(x.buy)>=7)return 'BUY';if((p.near||Number(p.dist)<=2)&&hold&&momentum>=2)return 'EARLY';return 'WATCH';}
-function compareCandidateState(a,b){const rank={BUY:3,EARLY:2,WATCH:1};return (rank[candidateState(b)]-rank[candidateState(a)])||compareProfitFirst(a,b);}
+function candidateState(x){if(hardGateReason(x))return 'REJECT';const p=x.p||{},m=x.m||{},rec=p.recovery||{},hold=!rec.confirmedSupportBreak&&!rec.fourHourFalling&&(rec.higherLow||rec.base||rec.reclaim||Number(p.dist)<0),momentum=[m.hist>m.prevHist,m.kdjK>m.kdjD,m.price>m.lastOpen,m.rsi6>=m.rsi12].filter(Boolean).length,flow=x.flow||{},flowOk=flow.status!=='REAL'||flow.m15?.net>0||!flow.distribution;if(p.bounce&&hold&&flowOk&&Number(p.marketRR)>=1.30&&Number(x.buy)>=7)return 'BUY';if(p.near&&!p.bounce&&hold&&flowOk)return 'LIMIT_WAIT';if(Number(p.conditionalEntry)>Number(p.stop)&&Number(p.conditionalEntry)<Number(p.marketEntry)&&Number(p.conditionalRR)>=1.30&&hold&&flowOk&&momentum>=2)return 'CONDITIONAL';if((p.near||Number(p.dist)<=2)&&hold&&flowOk&&momentum>=2)return 'EARLY';return 'WATCH';}
+function compareCandidateState(a,b){const rank={BUY:5,CONDITIONAL:4,LIMIT_WAIT:3,EARLY:2,WATCH:1};return (rank[candidateState(b)]-rank[candidateState(a)])||compareProfitFirst(a,b);}
 
 function klineNetFlow(rows,count){const a=(rows||[]).slice(-count),quote=a.reduce((s,x)=>s+(+x[7]||0),0),buy=a.reduce((s,x)=>s+(+x[10]||0),0);return{status:quote>0?'REAL':'VERİ YOK',net:quote>0?buy-(quote-buy):NaN,quote};}
 function flowPercentile(a,p){if(!a.length)return NaN;const s=[...a].sort((x,y)=>x-y);return s[Math.min(s.length-1,Math.floor((s.length-1)*p))];}
@@ -853,13 +858,14 @@ function uniqueLevels(values){return [...new Set(values.filter(Number.isFinite).
 function enrichRecoveryPlan(p,k15,k1h,k4h,k1d,m,h,flow,spread){
   const price=Number(m.price),daily=(k1d||[]).slice(-8),dailyHighs=daily.map(x=>+x[2]);
   const res=uniqueLevels([p.t1,p.t2,...swingLevels(k15,'high',2,120),...swingLevels(k1h,'high',2,160),...swingLevels(k4h||[],'high',2,120),...swingLevels(k1d||[],'high',1,120),...dailyHighs]).filter(x=>x>price*1.002);
-  p.resistances=res;p.t1=res[0]??p.t1;p.t2=res[1]??NaN;p.t3=res[2]??NaN;p.hasResistance=Number.isFinite(p.t1);p.earlyEntry=price>=p.zoneLow&&price<=p.zoneHigh?price:p.zoneHigh;p.rr=p.hasResistance&&p.earlyEntry>p.stop?(p.t1-p.earlyEntry)/(p.earlyEntry-p.stop):NaN;
+  const interimTarget=res[0]??p.t1,mainTarget=res.find(x=>x>interimTarget*1.002)??interimTarget,nextTarget=res.find(x=>x>mainTarget*1.006)??NaN;
+  p.resistances=res;p.interimTarget=interimTarget;p.mainTarget=mainTarget;p.t1=interimTarget;p.t2=mainTarget;p.t3=nextTarget;p.hasResistance=Number.isFinite(interimTarget);p.marketEntry=price;p.conditionalEntry=price>p.zoneHigh?p.zoneHigh:price;p.earlyEntry=p.conditionalEntry;p.marketRR=p.hasResistance&&price>p.stop&&mainTarget>price?(mainTarget-price)/(price-p.stop):NaN;p.conditionalRR=p.hasResistance&&p.conditionalEntry>p.stop&&mainTarget>p.conditionalEntry?(mainTarget-p.conditionalEntry)/(p.conditionalEntry-p.stop):NaN;p.rr=p.conditionalRR;
   const drops={};for(const days of [3,5,7]){const w=daily.slice(-days),peak=Math.max(...w.map(x=>+x[2]).filter(Number.isFinite));drops['d'+days]=peak>0?(price/peak-1)*100:NaN;}
   const priorPeak=Math.max(...dailyHighs.filter(Number.isFinite)),maxRecoveryPct=recoveryProfit(price,priorPeak),lows15=swingLevels(k15,'low',2,80),higherLow=lows15.length>=2&&lows15.at(-1)>lows15.at(-2)*1.001;
   const closes15=(k15||[]).slice(-2).map(x=>+x[4]),closes4h=(k4h||[]).slice(-3).map(x=>+x[4]),lows4h=(k4h||[]).slice(-3).map(x=>+x[3]),fourHourHold=closes4h.length>=2&&closes4h.at(-1)>=closes4h.at(-2),fourHourFalling=closes4h.length===3&&closes4h[2]<closes4h[1]&&closes4h[1]<closes4h[0]&&lows4h[2]<=lows4h[1];
   const lastDailyLow=+daily.at(-1)?.[3],previousDailyLows=daily.slice(0,-1).map(x=>+x[3]).filter(Number.isFinite),newLow=previousDailyLows.length&&lastDailyLow<=Math.min(...previousDailyLows),recent15=(k15||[]).slice(-4),range15=recent15.length?Math.max(...recent15.map(x=>+x[2]))-Math.min(...recent15.map(x=>+x[3])):Infinity,base=range15<=Math.max(Number(p.atr)||0,price*.012),reclaim=Number(m.price)>=Number(p.support)&&Number(m.lastLow)<Number(p.support),volume=Number(m.vol)>=Number(m.vma5),money=flow?.m15?.status==='REAL'&&flow.m15.net>0&&!flow.distribution,rsi=Number(m.rsi6)>=Number(m.rsi12)&&Number(m.rsi)>=35,kdj=Number(m.kdjK)>Number(m.kdjD),ema=Number(m.ema9)>=Number(m.ema21),macd=Number(m.hist)>Number(m.prevHist),boll=Number(m.price)>=Number(m.bollDn),spreadOk=Number(spread)<=.35,sellingPressure=flow?.status==='REAL'&&flow.m15?.net<0&&flow.m30?.net<0&&(flow.h1?.net<0||flow.orders?.large<0),confirmedSupportBreak=closes15.length===2&&closes15.every(x=>x<p.zoneLow)&&sellingPressure;
   const confirmations=[higherLow,base,reclaim,fourHourHold,volume,money,rsi,kdj,ema,macd,boll,spreadOk].filter(Boolean).length,stabilized=!confirmedSupportBreak&&!fourHourFalling&&(higherLow||base||reclaim),state=confirmedSupportBreak?'DESTEK KIRILDI — AL YOK':newLow?'YENİ DİP — İZLE':fourHourFalling?'DÜŞÜŞ SÜRÜYOR — AL YOK':stabilized&&confirmations>=7?'TOPARLANMA TEYİDİ':stabilized?'YATAY / İZLE':'DESTEK GERİ KAZANIMI / İZLE';
-  p.recovery={drops,higherLow,base,reclaim,fourHourHold,fourHourFalling,newLow,sellingPressure,confirmedSupportBreak,confirmations,state,nearTarget:p.t1,mainTarget:p.t2||p.t1,maxRecoveryLevel:priorPeak,maxRecoveryPct,guaranteed:false};return p;
+  p.recovery={drops,higherLow,base,reclaim,fourHourHold,fourHourFalling,newLow,sellingPressure,confirmedSupportBreak,confirmations,state,nearTarget:p.interimTarget,mainTarget:p.mainTarget,maxRecoveryLevel:priorPeak,maxRecoveryPct,guaranteed:false};return p;
 }
 
 async function analyzeCandidate(name, t24, bookMap = new Map()) {
@@ -934,11 +940,7 @@ function compareCandidate(a,b) {
 
 function resistancePotential(x){
   const p=x.p||{}, m=x.m||{}, h=x.h||{};
-  const entry=Number(p.earlyEntry||p.entry||m.price||0);
-  const t1=Number(p.t1||0), t2=Number(p.t2||0);
-  const upside1=(entry>0&&t1>entry)?((t1-entry)/entry*100):0;
-  const upside2=(entry>0&&t2>entry)?((t2-entry)/entry*100):0;
-  const rr=Number(p.rr||0);
+  const marketEntry=Number(p.marketEntry||m.price||0),entry=Number(p.conditionalEntry||marketEntry),t1=Number(p.interimTarget||p.t1||0),t2=Number(p.mainTarget||p.t2||t1),upside1=(entry>0&&t2>entry)?((t2-entry)/entry*100):0,upside2=(marketEntry>0&&t2>marketEntry)?((t2-marketEntry)/marketEntry*100):0,rr=Number(p.conditionalRR||0);
   const v=Math.max(0,Math.min(2.5,Number(x.vRatio||0)));
   const trend=(m.ema9>m.ema21?1:0)+(h.ema9>h.ema21?1:0)+(m.macd>m.signal?1:0)+(m.hist>m.prevHist?1:0);
   const rsiV=Number(m.rsi||50);
@@ -960,7 +962,7 @@ function resistancePotential(x){
   const expectedEdge=Math.max(0,upside1*executionConfidence-Math.max(0,sp));
 
   const eligible=!!p.hasResistance && !p.recovery?.confirmedSupportBreak && signedDist<=3.5 && rr>=1.30 && sp<=0.35;
-  return{score:Math.round(potScore*10)/10,upside1,upside2,rr,t1,t2,profitScore,reach,support,momentum,liquidity,expectedEdge:Math.round(expectedEdge*100)/100,dist,signedDist,eligible};
+  return{score:Math.round(potScore*10)/10,upside1,upside2,rr,marketRR:Number(p.marketRR),conditionalRR:Number(p.conditionalRR),t1,t2,profitScore,reach,support,momentum,liquidity,expectedEdge:Math.round(expectedEdge*100)/100,dist,signedDist,eligible};
 }
 
 function tradePlan(k15,k1h,m,h){
@@ -1002,10 +1004,10 @@ function score(m,h,p){
   // Tarayıcı ve Worker aynı 10 puanlık giriş modelini kullanır.
   let entryPts=0;
   if(p?.bounce)entryPts=3.0; else if(p?.near)entryPts=2.7; else if(d>=0&&d<=0.50)entryPts=2.4; else if(d<=1.0&&d>0)entryPts=2.0; else if(d<=1.75&&d>1.0)entryPts=1.3; else if(d<=2.5&&d>1.75)entryPts=.7; else if(d<0&&ad<=.75)entryPts=.4;
-  const entry=Number(p?.earlyEntry||p?.entry||p?.support||m.price), target=Number(p?.t1);
+  const entry=Number(p?.marketEntry||m.price), target=Number(p?.mainTarget||p?.t2||p?.t1);
   const upside=(Number.isFinite(target)&&Number.isFinite(entry)&&entry>0)?((target-entry)/entry*100):0;
   const profitPts=upside>=10?2:upside>=7?1.8:upside>=5?1.5:upside>=3?1.1:upside>0?Math.max(0,upside/3):0;
-  const rr=Number(p?.rr||0), rrPts=rr>=3?1:rr>=2?.85:rr>=1.5?.65:rr>=1.3?.45:0;
+  const rr=Number(p?.marketRR||0), rrPts=rr>=3?1:rr>=2?.85:rr>=1.5?.65:rr>=1.3?.45:0;
   const volPts=(m.vol>m.vma5?.65:.2)+(m.vma5>m.vma10?.35:0);
   const trendPts=(m.ema9>m.ema21?.55:0)+(h.ema9>h.ema21?.65:0)+(m.price>m.ema9?.30:0);
   const momentumPts=(m.rsi>=45&&m.rsi<=66?.45:m.rsi>72?0:.20)+(m.macd>m.signal?.55:0)+(m.hist>m.prevHist?.50:0);
@@ -1174,6 +1176,7 @@ function normalizeSyncedAnalyses(rows, allowedNames = []) {
     if (!Number.isFinite(buy) || !(stop > 0) || !(t1 > 0)) continue;
     result.push({
       name,
+      state:String(row?.state||''),
       buy,
       candidate:clampNumber(row?.candidate,0,100,0),
       spread:clampNumber(row?.spread,0,100,99),
@@ -1183,6 +1186,9 @@ function normalizeSyncedAnalyses(rows, allowedNames = []) {
         dist:clampNumber(p.dist,-1000,1000,99),
         near:Boolean(p.near), bounce:Boolean(p.bounce), hasResistance:Boolean(p.hasResistance),
         stop, t1, t2:Number.isFinite(t2)&&t2>0?t2:t1,t3:Number.isFinite(t3)&&t3>0?t3:null,
+        interimTarget:Number(p.interimTarget)||t1,mainTarget:Number(p.mainTarget)||t2||t1,
+        marketEntry:Number(p.marketEntry)||0,conditionalEntry:Number(p.conditionalEntry)||0,
+        marketRR:clampNumber(p.marketRR,0,100,0),conditionalRR:clampNumber(p.conditionalRR,0,100,0),
         recovery:p.recovery?{state:String(p.recovery.state||''),confirmations:Number(p.recovery.confirmations)||0,newLow:Boolean(p.recovery.newLow),maxRecoveryPct:clampNumber(p.recovery.maxRecoveryPct,-1000,1000,0),guaranteed:false}:null,
         rr:clampNumber(p.rr,0,100,0)
       },
