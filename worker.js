@@ -91,7 +91,9 @@ export default {
       if (url.pathname === '/set-tracked' && request.method === 'POST') {
         if (!isTrustedAppRequest(request, env)) return json({ok:false,error:'İstek kaynağı doğrulanamadı.'}, 403);
         const body = await request.json().catch(() => ({}));
-        const names = normalizeNames(body.coins || body.names || []);
+        const requested = normalizeNames(body.coins || body.names || []);
+        const [pairTickers,pairBooks]=await Promise.all([all24hTickers(),allBookTickers()]);
+        const validPairs=validTryPairs(pairTickers,pairBooks),names=requested.filter(n=>validPairs.has(n));
         if (!names.length) return json({ ok:false, error:'Coin listesi boş.' }, 400);
 
         const synced = normalizeSyncedAnalyses(body.analyses || [], names);
@@ -102,7 +104,7 @@ export default {
             catch (e) { analyzed.push({ name, error: String(e?.message || e) }); }
           }
         }
-        const good = analyzed.filter(x => !('error' in x));
+        const good = analyzed.filter(x => !('error' in x) && !hardGateReason(x));
         if (!good.length) return json({ ok:false, error:'Takip için geçerli veri alınamadı.', details:analyzed }, 422);
 
         const previous = await loadState(env);
@@ -185,17 +187,13 @@ async function backgroundCycle(env, opts = {}) {
   let marketTop3 = previous.marketTop3 || [];
   let tickerMap = new Map();
   let bookMap = new Map();
+  let validPairs = new Set();
   if (shouldFullScan) {
     market = await scanMarket();
     tickerMap = market.tickerMap || new Map();
     bookMap = market.bookMap || new Map();
-    const eligible = market.metrics.filter(x => x.rpot?.eligible).sort(compareProfitFirst);
-    const backups = market.metrics.filter(x => x.rpot && !x.rpot.eligible).sort(compareProfitFirst);
-    marketTop3 = eligible.slice(0, TRACK_COUNT);
-    for (const x of backups) {
-      if (marketTop3.length >= TRACK_COUNT) break;
-      if (!marketTop3.some(y => y.name === x.name)) marketTop3.push(x);
-    }
+    validPairs = market.validPairs || new Set();
+    marketTop3 = market.metrics.filter(x=>!hardGateReason(x)).sort(compareCandidateState).slice(0,TRACK_COUNT);
   } else {
     const [tickers, books] = await Promise.all([
       all24hTickers().catch(() => []),
@@ -203,6 +201,7 @@ async function backgroundCycle(env, opts = {}) {
     ]);
     tickerMap = new Map(tickers.map(x => [String(x.symbol || x.s || ''), x]));
     bookMap = new Map(books.map(x => [String(x.symbol || x.s || ''), x]));
+    validPairs = validTryPairs(tickers,books);
   }
 
   // Takip listesindeki coinleri her cron tetiklenmesinde (önerilen 15 dk) yeniden analiz et.
@@ -211,14 +210,14 @@ async function backgroundCycle(env, opts = {}) {
   const analysisErrors = [];
   for (const old of (previous.tracked || []).slice(0, TRACK_COUNT)) {
     const name = cleanBase(old?.name || old?.symbol || '');
-    if (!name) continue;
+    if (!name||!validPairs.has(name)) continue;
     try {
       const cached = analysisByName.get(name);
       if (shouldFullScan && !cached) continue;
       const ticker = tickerMap.get(name+'TRY') || tickerMap.get(name+'_TRY') || null;
       const analyzed = cached || await analyzeCandidate(name, ticker, bookMap);
-      currentTracked.push(analyzed);
       analysisByName.set(name, analyzed);
+      if(!hardGateReason(analyzed))currentTracked.push(analyzed);
     }
     catch (e) { analysisErrors.push(`${name}: ${String(e?.message || e)}`); }
   }
@@ -232,9 +231,9 @@ async function backgroundCycle(env, opts = {}) {
       if (!tracked.some(x => x.name === candidate.name)) tracked.push(candidate);
     }
   } else {
-    tracked = shouldFullScan ? sortByProfit(marketTop3).slice(0, TRACK_COUNT) : (previous.tracked || []).slice(0,TRACK_COUNT);
+    tracked = shouldFullScan ? sortByProfit(marketTop3).slice(0, TRACK_COUNT) : [];
   }
-  if (!shouldFullScan && analysisErrors.length) tracked = (previous.tracked || []).slice(0,TRACK_COUNT);
+  if (!shouldFullScan && analysisErrors.length) tracked = currentTracked.filter(x=>!hardGateReason(x)).slice(0,TRACK_COUNT);
 
   const analysisReady = analysisErrors.length === 0 && tracked.length > 0;
   const marketAlerts = opts.collectAlerts && opts.quarterHourly && analysisReady ? await buildPositionAlerts(env, previous.tracked || [], tracked) : [];
@@ -802,11 +801,12 @@ async function sendStoredFourHourSummary(env, scheduledAt) {
 async function scanMarket() {
   const [tickers, books] = await Promise.all([all24hTickers(), allBookTickers()]);
   const bookMap = new Map(books.map(x => [String(x.symbol || x.s || ''), x]));
+  const validPairs = validTryPairs(tickers,books);
 
   let tryTicks = tickers.filter(t => {
     const sym = String(t.symbol || t.s || '');
     const base = baseFromSymbol(sym);
-    return /_?TRY$/.test(sym) && base && !EXCLUDED_BASES.has(base) && num(t,'quoteVolume','q','volumeQuote','quoteAssetVolume') > 0;
+    return validPairs.has(base) && !EXCLUDED_BASES.has(base);
   });
 
   tryTicks.sort((a,b) => num(b,'quoteVolume','q','volumeQuote','quoteAssetVolume') - num(a,'quoteVolume','q','volumeQuote','quoteAssetVolume'));
@@ -828,8 +828,20 @@ async function scanMarket() {
   if (metrics.length < 3) throw new Error('Yeterli TRY coin verisi alınamadı.');
   assignCandidateScores(metrics);
   const tickerMap = new Map(tickers.map(x => [String(x.symbol || x.s || ''), x]));
-  return { scanned: top.length, metrics, tickerMap, bookMap };
+  return { scanned: top.length, metrics, tickerMap, bookMap, validPairs };
 }
+
+function validTryPairs(tickers,books){
+  const live=new Set((books||[]).filter(x=>num(x,'bidPrice','b')>0&&num(x,'askPrice','a')>0).map(x=>String(x.symbol||x.s||'')));
+  return new Set((tickers||[]).filter(t=>{const sym=String(t.symbol||t.s||''),base=baseFromSymbol(sym);return /_?TRY$/.test(sym)&&base&&num(t,'quoteVolume','q','volumeQuote','quoteAssetVolume')>0&&(live.has(sym)||live.has(base+'TRY')||live.has(base+'_TRY'));}).map(t=>baseFromSymbol(String(t.symbol||t.s||''))));
+}
+
+function hardGateReason(x){
+  const p=x?.p||{},r=x?.rpot||{},f=x?.flow||{},entry=Number(p.entry),stop=Number(p.stop),rr=Number(p.rr),spread=Number(x?.spread),out=f.status==='REAL'&&f.m15?.net<0&&f.m30?.net<0&&f.h1?.net<0&&Math.abs(f.m15.net)*2>Math.abs(f.m30.net);
+  if(!p.hasResistance)return 'HEDEF_YOK';if(!(spread>=0&&spread<=.35))return 'SPREAD_LIKIDITE';if(!(stop>0&&stop<entry))return 'STOP_YOK';if(rr<1.30)return 'RR';if(Number(p.dist)<0||String(p.status||'').includes('DESTEK ALTI')||p.recovery?.newLow)return 'DESTEK_KIRILDI';if(out||f.distribution)return 'PARA_CIKISI';if(Number(r.upside1)<3)return 'KAR_ALANI_ERIDI';return '';
+}
+function candidateState(x){if(hardGateReason(x))return 'REJECT';const p=x.p||{},m=x.m||{},rec=p.recovery||{},hold=(rec.higherLow||rec.base||rec.reclaim)&&!rec.fourHourFalling,momentum=[m.hist>m.prevHist,m.kdjK>m.kdjD,m.price>m.lastOpen,m.rsi6>=m.rsi12].filter(Boolean).length;if(p.bounce&&hold&&Number(x.buy)>=7)return 'BUY';if((p.near||Number(p.dist)<=2)&&hold&&momentum>=2)return 'EARLY';return 'WATCH';}
+function compareCandidateState(a,b){const rank={BUY:3,EARLY:2,WATCH:1};return (rank[candidateState(b)]-rank[candidateState(a)])||compareProfitFirst(a,b);}
 
 function klineNetFlow(rows,count){const a=(rows||[]).slice(-count),quote=a.reduce((s,x)=>s+(+x[7]||0),0),buy=a.reduce((s,x)=>s+(+x[10]||0),0);return{status:quote>0?'REAL':'VERİ YOK',net:quote>0?buy-(quote-buy):NaN,quote};}
 function flowPercentile(a,p){if(!a.length)return NaN;const s=[...a].sort((x,y)=>x-y);return s[Math.min(s.length-1,Math.floor((s.length-1)*p))];}
