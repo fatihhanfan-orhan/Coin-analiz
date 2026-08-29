@@ -193,7 +193,7 @@ async function backgroundCycle(env, opts = {}) {
     tickerMap = market.tickerMap || new Map();
     bookMap = market.bookMap || new Map();
     validPairs = market.validPairs || new Set();
-    marketTop3 = market.metrics.filter(x=>!hardGateReason(x)).sort(compareCandidateState).slice(0,TRACK_COUNT);
+    marketTop3 = market.metrics.filter(x=>!hardGateReason(x)&&(candidateState(x)==='BUY'||(Number(x.rpot?.upside1)>=3&&Number(x.rpot?.expectedEdge)>=1))).sort(compareCandidateState).slice(0,TRACK_COUNT);
   } else {
     const [tickers, books] = await Promise.all([
       all24hTickers().catch(() => []),
@@ -843,10 +843,11 @@ function validTryPairs(tickers,books){
 
 function hardGateReason(x){
   const p=x?.p||{},f=x?.flow||{},marketEntry=Number(p.marketEntry||x?.m?.price),conditionalEntry=Number(p.conditionalEntry),stop=Number(p.stop),marketRR=Number(p.marketRR),conditionalRR=Number(p.conditionalRR),spread=Number(x?.spread),out=f.status==='REAL'&&f.m15?.net<0&&f.m30?.net<0&&f.h1?.net<0&&Math.abs(f.m15.net)*2>Math.abs(f.m30.net);
-  if(!p.hasResistance)return 'HEDEF_YOK';if(!(spread>=0&&spread<=.35))return 'SPREAD_LIKIDITE';if(!(stop>0&&stop<marketEntry))return 'STOP_YOK';if(p.recovery?.confirmedSupportBreak)return 'DESTEK_KIRILDI';if(out||f.distribution)return 'PARA_CIKISI';if(Number(p.dist)>3.5||Number(x?.m?.rsi)>78)return 'GEC_KALINDI';if(!(marketRR>=1.30)&&!(conditionalEntry<marketEntry&&conditionalRR>=1.30))return 'RR';return '';
+  if(!p.hasResistance)return 'HEDEF_YOK';if(!(spread>=0&&spread<=.35))return 'SPREAD_LIKIDITE';if(!(stop>0&&stop<marketEntry))return 'STOP_YOK';if(p.recovery?.confirmedSupportBreak)return 'DESTEK_KIRILDI';if(out||f.distribution)return 'PARA_CIKISI';if(!(marketRR>=1.30)&&!(conditionalEntry<marketEntry&&conditionalRR>=1.30))return 'RR';return '';
 }
-function candidateState(x){if(hardGateReason(x))return 'REJECT';const p=x.p||{},m=x.m||{},rec=p.recovery||{},hold=!rec.confirmedSupportBreak&&!rec.fourHourFalling&&(rec.higherLow||rec.base||rec.reclaim||Number(p.dist)<0),momentum=[m.hist>m.prevHist,m.kdjK>m.kdjD,m.price>m.lastOpen,m.rsi6>=m.rsi12].filter(Boolean).length,flow=x.flow||{},flowOk=flow.status!=='REAL'||flow.m15?.net>0||!flow.distribution;if(p.bounce&&hold&&flowOk&&Number(p.marketRR)>=1.30&&Number(x.buy)>=7)return 'BUY';if(p.near&&!p.bounce&&hold&&flowOk)return 'LIMIT_WAIT';if(Number(p.conditionalEntry)>Number(p.stop)&&Number(p.conditionalEntry)<Number(p.marketEntry)&&Number(p.conditionalRR)>=1.30&&hold&&flowOk&&momentum>=2)return 'CONDITIONAL';if((p.near||Number(p.dist)<=2)&&hold&&flowOk&&momentum>=2)return 'EARLY';return 'WATCH';}
-function compareCandidateState(a,b){const rank={BUY:5,CONDITIONAL:4,LIMIT_WAIT:3,EARLY:2,WATCH:1};return (rank[candidateState(b)]-rank[candidateState(a)])||compareProfitFirst(a,b);}
+function finderRiskFlags(x){const p=x?.p||{},m=x?.m||{},rec=p.recovery||{},f=x?.flow||{},drops=rec.drops||{},severeDrop=Number(drops.d3)<=-8||Number(drops.d5)<=-12||Number(drops.d7)<=-18,weakRecovery=severeDrop&&f.status==='REAL'&&Number(f.h1?.net)<0&&rec.state!=='TOPARLANMA TEYİDİ',fast15=Number(m.lastOpen)>0&&((Number(m.price)/Number(m.lastOpen)-1)*100)>=2.5,overheat=Number(m.rsi6)>=82||Number(m.rsi12)>=72||Number(m.rsi)>75,entryGap=Number(p.marketEntry)>0&&Number(p.conditionalEntry)>0?(Number(p.marketEntry)/Number(p.conditionalEntry)-1)*100:0,chased=overheat||fast15||entryGap>2.5;return{severeDrop,weakRecovery,fast15,overheat,entryGap,chased,pullback:weakRecovery||chased};}
+function candidateState(x){if(hardGateReason(x))return 'REJECT';const p=x.p||{},m=x.m||{},rec=p.recovery||{},hold=!rec.confirmedSupportBreak&&!rec.fourHourFalling&&(rec.higherLow||rec.base||rec.reclaim||Number(p.dist)<0),momentum=[m.hist>m.prevHist,m.kdjK>m.kdjD,m.price>m.lastOpen,m.rsi6>=m.rsi12].filter(Boolean).length,flow=x.flow||{},flowOk=flow.status!=='REAL'||flow.m15?.net>0||!flow.distribution;if(finderRiskFlags(x).pullback)return 'PULLBACK';if(p.bounce&&hold&&flowOk&&Number(p.marketRR)>=1.30&&Number(x.buy)>=7)return 'BUY';if(p.near&&!p.bounce&&hold&&flowOk)return 'LIMIT_WAIT';if(Number(p.conditionalEntry)>Number(p.stop)&&Number(p.conditionalEntry)<Number(p.marketEntry)&&Number(p.conditionalRR)>=1.30&&hold&&flowOk&&momentum>=2)return 'CONDITIONAL';if((p.near||Number(p.dist)<=2)&&hold&&flowOk&&momentum>=2)return 'EARLY';return 'WATCH';}
+function compareCandidateState(a,b){const rank={BUY:6,CONDITIONAL:5,LIMIT_WAIT:4,EARLY:3,PULLBACK:2,WATCH:1};return (rank[candidateState(b)]-rank[candidateState(a)])||compareProfitFirst(a,b);}
 
 function klineNetFlow(rows,count){const a=(rows||[]).slice(-count),quote=a.reduce((s,x)=>s+(+x[7]||0),0),buy=a.reduce((s,x)=>s+(+x[10]||0),0);return{status:quote>0?'REAL':'VERİ YOK',net:quote>0?buy-(quote-buy):NaN,quote};}
 function flowPercentile(a,p){if(!a.length)return NaN;const s=[...a].sort((x,y)=>x-y);return s[Math.min(s.length-1,Math.floor((s.length-1)*p))];}
@@ -929,8 +930,9 @@ function assignCandidateScores(metrics) {
     const chasePenalty=d>3?Math.min(30,(d-3)*5):0;
     const belowPenalty=d<-1.5?10:0;
     const overheat=x.m.rsi>72?8:0;
-    const recovery=x.p?.recovery||{},recoveryBonus=recovery.state==='TOPARLANMA TEYİDİ'?Math.min(4,Number(recovery.confirmations||0)*.45):0,recoveryPenalty=recovery.newLow?20:0,theoreticalBonus=Math.min(2,Math.max(0,Number(recovery.maxRecoveryPct||0))*.03);
-    x.candidate=Math.max(0,Math.min(100,profitPts+reachPts+supportPts+momentumPts+liquidPts+recoveryBonus+theoreticalBonus-chasePenalty-belowPenalty-overheat-recoveryPenalty));
+    const recovery=x.p?.recovery||{},risk=finderRiskFlags(x),recoveryBonus=recovery.state==='TOPARLANMA TEYİDİ'?Math.min(4,Number(recovery.confirmations||0)*.45):0,dipNearBonus=risk.severeDrop&&Math.abs(d)<=1.5&&(recovery.higherLow||recovery.base||recovery.reclaim)?8:0,recoveryPenalty=recovery.newLow?20:0,weakFlowPenalty=risk.weakRecovery?12:0,weakVolumePenalty=x.vRatio<.8?10:0,fastRisePenalty=risk.chased?18:0,theoreticalBonus=Math.min(2,Math.max(0,Number(recovery.maxRecoveryPct||0))*.03);
+    x.candidate=Math.max(0,Math.min(100,profitPts+reachPts+supportPts+momentumPts+liquidPts+recoveryBonus+dipNearBonus+theoreticalBonus-chasePenalty-belowPenalty-overheat-recoveryPenalty-weakFlowPenalty-weakVolumePenalty-fastRisePenalty));
+    if(x.vRatio<.8&&!bounce)x.candidate=Math.min(x.candidate,74);
   }
 }
 
