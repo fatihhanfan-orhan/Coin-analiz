@@ -167,7 +167,7 @@ window.CoinOneSignalReady = new Promise((resolve) => {
   <b>⚖️ ALIŞ / SATIŞ PUAN DAĞILIMI</b>
   <div class="note"><b>TEKNİK ALIŞ 10 puan:</b> Destek/giriş 3,0 • Brüt H1 kâr alanı 2,0 • Risk/kazanç 1,0 • Trend/EMA 1,5 • Hacim 1,0 • RSI+MACD 1,5. Pozisyon kartındaki haber/olay etkisi ayrıca ve sınırlı ağırlıkla uygulanır.<br><b>POZİSYON SATIŞI V2:</b> Tek satış puanı yerine <b>Yükseliş Gücü 0–10</b> ve <b>Kâr Geri Verme Riski 0–10</b> ayrı hesaplanır. RSI6/12/24 + KDJ + Bollinger taşması + hacim + MACD ivmesi + direnç yakınlığı + canlı zirveden geri çekilme birlikte değerlendirilir.</div>
 </div><div class="card summary">
-  <b>🧠 V5.0 DENETİMLİ KARAR MOTORU</b>
+  <b>🧠 V5.1 DENETİMLİ KARAR MOTORU</b>
   <div class="note">Teknik puan + maksimum kâr alanı + risk/kazanç + pozisyon kâr koruma + haber/olay etkisi birlikte değerlendirilir. Haber tek başına AL sinyali üretmez; güçlü negatif olay teknik puanı aşağı çekebilir ve pozisyon alarmını yükseltebilir.</div>
 </div><div class="note">Bu panel emir vermez. Teknik göstergeleri puanlar. Haber, token unlock, ani piyasa hareketi ve emir defteri ayrıca değerlendirilmelidir.</div></div>
 </div>
@@ -184,9 +184,10 @@ async function purgeGhostPairs(){const valid=await refreshPairRegistry();const c
 function syncLegacyInputs(names=loadWatch()){[$('c1'),$('c2'),$('c3')].forEach((e,i)=>{if(e)e.value=names[i]||''})}
 async function trackOpportunity(name,btn){const n=cleanCoinName(name),list=loadWatch();if(list.includes(n))return;if(btn){btn.disabled=true;btn.textContent='DOĞRULANIYOR…'}const valid=await refreshPairRegistry(true);if(!valid.has(n)){saveWatch(list.filter(x=>x!==n));if(btn){btn.textContent='GEÇERSİZ TRY PAIR';btn.classList.add('tracked')}return}saveWatch([...list,n]);await run({manual:true});if(btn){btn.textContent='✅ TAKİPTE';btn.classList.add('tracked')}}
 async function untrackOpportunity(name){saveWatch(loadWatch().filter(x=>x!==cleanCoinName(name)));await run({manual:true})}
-function quoteIsFresh(name){const q=liveQuotes?.[cleanCoinName(name)];return !!(q&&quoteAgeMs(q)<=QUOTE_STALE_MS)}
+function quoteIsFresh(name){const q=liveQuotes?.[cleanCoinName(name)];return !!(q&&q.bid>0&&q.ask>=q.bid&&quoteAgeMs(q)<=QUOTE_STALE_MS)}
 function entryState(d,name=''){
- const p=d?.p||{},m=d?.m||{},s=d?.s||{};if(name&&liveQuotes[name]&&!quoteIsFresh(name))return{key:'STALE',label:'VERİ BAYAT — KARAR DURDURULDU',tone:'red',hard:true};
+ const p=d?.p||{},m=d?.m||{},s=d?.s||{};if(name&&!quoteIsFresh(name))return{key:'STALE',label:'VERİ BAYAT — KARAR DURDURULDU',tone:'red',hard:true};
+ if(d?.revalidating)return{key:'RECHECK',label:'GÜNCEL PLAN DOĞRULANIYOR — TEYİT BEKLE',tone:'yellow',hard:true};
  if(p.near&&Number(d?.analyzedAt)>0&&Date.now()-Number(d.analyzedAt)>16*60*1000)return{key:'RECHECK',label:'PLAN BAYAT — YENİDEN DOĞRULANIYOR',tone:'yellow',hard:true};
  const marketEntry=Number(p.marketEntry||m.price),conditionalEntry=Number(p.conditionalEntry),stop=Number(p.stop),mainD1=Number(p.mainTarget||p.t2||p.t1),marketRR=Number(p.marketRR),conditionalRR=Number(p.conditionalRR);
  const conditionalBelow=conditionalEntry>stop&&conditionalEntry<marketEntry&&mainD1>conditionalEntry,rrBroken=!(marketRR>=1.30)&&!(conditionalBelow&&conditionalRR>=1.30),commonBroken=!p.hasResistance||p.recovery?.confirmedSupportBreak||Number(d?.spread)>0.35||!(stop>0&&stop<marketEntry)||rrBroken;
@@ -449,9 +450,12 @@ async function livePrice(name){
 }
 async function liveBook(name){
  const clean=name.toUpperCase().replace(/[^A-Z0-9]/g,'');
- const j=await fetchJsonAny([`https://api.binance.me/api/v3/ticker/bookTicker?symbol=${clean}TRY`,`https://cloudme-tr.2meta.app/api/v1/ticker/bookTicker?symbol=${clean}_TRY`,`https://cloudme-tr.2meta.app/api/v1/ticker/bookTicker?symbol=${clean}TRY`]);
+ let j,source='BINANCE_TR_REST_DEPTH';
+ try{j=await fetchJsonAny([`https://api.binance.me/api/v3/ticker/bookTicker?symbol=${clean}TRY`,`https://cloudme-tr.2meta.app/api/v1/ticker/bookTicker?symbol=${clean}_TRY`,`https://cloudme-tr.2meta.app/api/v1/ticker/bookTicker?symbol=${clean}TRY`]);}
+ catch{const r=await fetchWithTimeout(COIN_WORKER_API+'/quote?coin='+clean,{cache:'no-store'},4500);if(!r.ok)throw new Error('canlı BID/ASK alınamadı');j=await r.json();source='BINANCE_TR_WORKER_WS';if(!j.at||Date.now()-j.at>QUOTE_STALE_MS)throw new Error('Worker BID/ASK bayat');}
  const raw=j?.data||j,bid=num(raw,'bidPrice','b'),ask=num(raw,'askPrice','a');
- if(!(bid>0&&ask>0))throw new Error('canlı BID/ASK alınamadı');
+ if(!(bid>0&&ask>=bid))throw new Error('canlı BID/ASK alınamadı');
+ applyPositionQuote(clean,bid,ask,source);
  return{bid,ask,spread:(ask-bid)/((ask+bid)/2)*100};
 }
 const technicalAnalysisCache={};
@@ -605,11 +609,14 @@ async function runManualCoin(){
    let warn='';
    if(Number.isFinite(upside)&&upside<3) warn=`<div class="manualWarn">⚠️ Direnç-1 kâr alanı %${upside.toFixed(2)}. Day-trade ana kriterimiz olan %3'ün altında; yine de manuel isteğiniz nedeniyle analiz gösteriliyor.</div>`;
    currentManualCoin=n;
+   latestAnalysis[n]=data;
    const lifecycle=active
     ?`<div class="modeBanner">ALINDI — TAKİPTE • ALDIM, NE ZAMAN SATAYIM?</div><button class="manualLifecycleAction" style="margin-top:10px;background:#7f1d1d" onclick="removePosition('${active.id}')">SATTIM / POZİSYONU KAPAT</button>`
     :`<div class="modeBanner" style="background:#17345a;color:#d8e9ff">ALIM MODU • ALAYIM MI?</div><button class="manualLifecycleAction" style="margin-top:10px;background:#0f8f3b" onclick="quickAddPosition('${n}',this)">✅ CANLI ASK İLE ALDIM</button>`;
    box.innerHTML=lifecycle+card(n,data,null)+warn;
    compactManualResult(box,!!active);
+   refreshEntryQuoteDom(n);
+   startMarketWS();startPositionLiveTracking();fetchPositionDepthSnapshot(n);
    input.value='';
  }catch(e){
    box.innerHTML=`<div class="coin badborder"><div class="coin-title">${n}/TRY</div><div class="err">Veri alınamadı: ${e.message}</div></div>`;
@@ -1155,17 +1162,18 @@ async function manualPositionCheck(btn){
 function positionCoinNames(){return [...new Set(loadPositions().map(x=>cleanCoinName(x.name)).filter(Boolean))]}
 function positionQuoteFresh(q,maxAge=POSITION_QUOTE_WARN_MS){return !!(q&&Number.isFinite(q.bid)&&q.bid>0&&quoteAgeMs(q)<=maxAge)}
 function applyPositionQuote(name,bid,ask,source='BINANCE_TR_WS'){
- const clean=cleanCoinName(name),qb=Number(bid),qa=Number(ask),prev=liveQuotes[clean]||{};
- if(!(Number.isFinite(qb)&&qb>0)&&!(Number.isFinite(qa)&&qa>0))return;
+ const clean=cleanCoinName(name),qb=Number(bid),qa=Number(ask);
+ if(!(Number.isFinite(qb)&&qb>0&&Number.isFinite(qa)&&qa>=qb))return;
  liveQuotes[clean]={
-   bid:Number.isFinite(qb)&&qb>0?qb:prev.bid,
-   ask:Number.isFinite(qa)&&qa>0?qa:prev.ask,
+   bid:qb,
+   ask:qa,
    at:Date.now(),
    exchangeAt:exchangeNowMs(),
    recvPerf:perfNow(),
    source
  };
  updatePositionLiveDom(clean);
+ refreshEntryQuoteDom(clean);
 }
 function updatePositionLiveDom(name){
  const clean=cleanCoinName(name),pos=loadPositions().find(x=>x.name===clean),q=liveQuotes[clean];
@@ -1258,7 +1266,7 @@ async function fetchPositionDepthSnapshot(name){
        lastErr='geçerli bid/ask yok';
      }catch(e){lastErr=e.message||String(e)}
    }
-   return false;
+   try{await liveBook(clean);refreshEntryQuoteDom(clean);return true}catch{return false}
  }finally{positionRestLocks.delete(clean)}
 }
 function startPositionQuoteStream(){
@@ -1271,6 +1279,7 @@ async function positionQuoteWatchdog(){
  for(const n of names){
    const q=liveQuotes[n],age=quoteAgeMs(q);
    updatePositionLiveDom(n);
+   refreshEntryQuoteDom(n);
    const sid=cleanCoinName(n),w=$('ws_'+sid),dt=$('dataTime_'+sid);
    if(q&&age>QUOTE_STALE_MS){if(w){w.textContent='● veri bayat / REST deneniyor';w.className='wsOff'}if(dt)dt.textContent=(age/1000).toFixed(1)+' sn önce'}
    if(!q||age>POSITION_REST_FALLBACK_AFTER_MS)fetchPositionDepthSnapshot(n);
@@ -1376,7 +1385,7 @@ async function run(opts={}){
  $('coins').innerHTML=activeNames.length?activeNames.map(n=>`<div class="coin"><div class="coin-title">${n}/TRY</div><div class="sub">Veriler alınıyor…</div></div>`).join(''):'';
  $('update').textContent=activeNames.length?'Güncelleniyor…':'Hazır';
   let results=await Promise.all(activeNames.map(async n=>{try{return{name:n,data:await analyze(n,{force:Boolean(opts.manual||opts.auto)})}}catch(e){return{name:n,error:e.message}}}));
- latestAnalysis={};for(const r of results){if(r.data)latestAnalysis[r.name]=r.data;}
+ latestAnalysis=currentManualCoin&&latestAnalysis[currentManualCoin]?{[currentManualCoin]:latestAnalysis[currentManualCoin]}:{};for(const r of results){if(r.data)latestAnalysis[r.name]=r.data;}
  const ordered=results.filter(r=>r.data).sort((a,b)=>(watchRankScore(b)-watchRankScore(a))||(realizableProfitPct(b)-realizableProfitPct(a)));
  const orderedNames=new Set(ordered.map(r=>r.name));
  const errors=results.filter(r=>!orderedNames.has(r.name));
@@ -1434,11 +1443,36 @@ function scheduleFourHourScan(){
  fourHourTimer=setTimeout(runFourHourScan,delay);
 }
 let marketWS=null,wsRetryTimer=null,latestAnalysis={};const conditionalRecheckAt={};
-function activeCoinNames(){return [...new Set([...loadWatch(),...positionCoinNames()])]}
+function activeCoinNames(){return [...new Set([...loadWatch(),...positionCoinNames(),currentManualCoin].filter(Boolean))]}
+function refreshEntryQuoteDom(name){
+ const q=liveQuotes[name],fresh=quoteIsFresh(name),d=latestAnalysis[name];
+ for(const root of document.querySelectorAll(`.coin[data-coin="${name}"]`)){
+   const set=(id,value)=>{const e=root.querySelector(`[id="${id}_${name}"]`);if(e)e.textContent=value};
+   set('bid',fresh?fmt(q.bid,6):'—');set('ask',fresh?fmt(q.ask,6):'—');
+   if(fresh)set('livePrice',fmt(q.ask,6));
+   set('spread',fresh?fmt((q.ask-q.bid)/((q.ask+q.bid)/2)*100,3)+'%':'—');
+   set('ws',fresh?(q.source==='BINANCE_TR_WS'?'● CANLI • WS':q.source==='BINANCE_TR_WORKER_WS'?'● CANLI • WORKER WS YEDEK':'● CANLI • REST YEDEK'):'● BID/ASK bekleniyor / veri bayat');
+   set('dataTime',q?'son BID/ASK '+trClock(q.exchangeAt||q.at)+' TR':'BID/ASK veri zamanı bekleniyor');
+   const button=root.querySelector('.quickBuyBtn'),positions=loadPositions(),active=positions.some(x=>x.name===name),full=positions.length>=MAX_ACTIVE_POSITIONS;
+   if(button){button.disabled=!fresh||active||full;button.textContent=!fresh?'⏳ CANLI ASK BEKLENİYOR…':active?'✅ ALINDI / TAKİPTE':full?'⛔ 3/3 POZİSYON DOLU':`✅ ASK ${fmt(q.ask,6)} • BU FİYATTAN ALDIM`;}
+   if(d){const price=fresh?q.ask:d.m.price,p=d.p,marketRR=price>p.stop?(p.mainTarget-price)/(price-p.stop):NaN;
+     const current={...d,m:{...d.m,price},spread:fresh?(q.ask-q.bid)/((q.ask+q.bid)/2)*100:d.spread,p:{...p,marketEntry:price,marketRR}};
+     const state=entryState(current,name),decision=root.querySelector('.decision');if(decision){decision.textContent=state.label;decision.className='decision '+(state.tone==='green'?'good':state.tone==='yellow'?'mid':'bad');}}
+ }
+}
+let manualRecheckBusy=false;
+async function recheckManualCoin(){
+ const name=currentManualCoin;if(!name||manualRecheckBusy)return;
+ manualRecheckBusy=true;if(latestAnalysis[name])latestAnalysis[name].revalidating=true;refreshEntryQuoteDom(name);
+ try{const data=await analyze(name,{force:true});if(currentManualCoin!==name)return;latestAnalysis[name]=data;const root=$('manualResult').querySelector(`.coin[data-coin="${name}"]`);if(root)root.outerHTML=card(name,data,null);compactManualResult($('manualResult'),loadPositions().some(x=>x.name===name));refreshEntryQuoteDom(name);}
+ catch(e){console.warn('Tek Coin güncel plan doğrulanamadı:',e);}
+ finally{manualRecheckBusy=false;}
+}
 function wsSymbolToBase(sym){return String(sym||'').toUpperCase().replace(/TRY$/,'')}
 function updateLiveDom(name,patch={}){
  const sid=name.replace(/[^A-Z0-9]/g,''), d=latestAnalysis[name];
  const qb=Number(patch.bid),qa=Number(patch.ask);
+ if(qb>0&&qa>=qb&&!Number.isFinite(patch.price))patch.price=qa;
  if((Number.isFinite(qb)&&qb>0)||(Number.isFinite(qa)&&qa>0)){
    applyPositionQuote(name,qb,qa,patch.source||'BINANCE_TR_WS');
    if(Number.isFinite(qa)&&qa>0){
@@ -1452,13 +1486,12 @@ function updateLiveDom(name,patch={}){
    if(d?.p?.zoneHigh){const dist=(px-Number(d.p.zoneHigh))/px*100;const q=$('supportDist_'+sid);if(q)q.textContent=(dist>0?'+':'')+fmt(dist,2)+'%';}
     if(d?.m?.closedPrice){const ch=((px/d.m.closedPrice)-1)*100;const c=$('liveChange_'+sid);if(c){c.textContent=(ch>=0?'+':'')+fmt(ch,2)+'% • son 15 dk kapanışına göre';c.className='chg '+(ch>=0?'good':'bad')}}
    const limit=Number(d?.p?.conditionalEntry),state=d?entryState(d,name).key:'';
-   if(limit>0&&px<=limit*1.002&&['CONDITIONAL','PULLBACK','RECHECK'].includes(state)&&Date.now()-Number(conditionalRecheckAt[name]||0)>60*1000){conditionalRecheckAt[name]=Date.now();const pill=document.querySelector(`.coin[data-coin="${sid}"] .statePill`);if(pill)pill.textContent='LİMİT BÖLGESİ — GÜNCEL PLAN DOĞRULANIYOR';Promise.resolve().then(()=>run({manual:true,conditionalRecheck:true})).catch(e=>console.warn('Koşullu plan yeniden doğrulanamadı:',e))}
+   if(limit>0&&px<=limit*1.002&&['CONDITIONAL','PULLBACK','RECHECK'].includes(state)&&Date.now()-Number(conditionalRecheckAt[name]||0)>60*1000){conditionalRecheckAt[name]=Date.now();d.revalidating=true;const pill=document.querySelector(`.coin[data-coin="${sid}"] .statePill`);if(pill)pill.textContent='LİMİT BÖLGESİ — GÜNCEL PLAN DOĞRULANIYOR';Promise.resolve().then(()=>name===currentManualCoin?recheckManualCoin():run({manual:true,conditionalRecheck:true})).catch(e=>console.warn('Koşullu plan yeniden doğrulanamadı:',e))}
  }
  if(Number.isFinite(patch.bid)){const e=$('bid_'+sid);if(e)e.textContent=fmt(patch.bid,6)}
  if(Number.isFinite(patch.ask)){const e=$('ask_'+sid);if(e)e.textContent=fmt(patch.ask,6)}
  if(Number.isFinite(patch.bid)&&Number.isFinite(patch.ask)&&patch.bid>0&&patch.ask>0){const mid=(patch.bid+patch.ask)/2,sp=(patch.ask-patch.bid)/mid*100;const e=$('spread_'+sid);if(e)e.textContent=fmt(sp,3)+'%'}
-  const w=$('ws_'+sid);if(w){w.textContent=patch.source==='BINANCE_TR_REST_DEPTH'?'● CANLI • REST YEDEK':'● CANLI • WS';w.className='wsLive'}
-  const dt=$('dataTime_'+sid);if(dt)dt.textContent='veri '+trClock(exchangeNowMs())+' TR';
+  refreshEntryQuoteDom(name);
   if($('liveChecked'))$('liveChecked').textContent=new Date().toLocaleTimeString('tr-TR');
 }
 function stopMarketWS(){if(wsRetryTimer)clearTimeout(wsRetryTimer);wsRetryTimer=null;if(marketWS){try{marketWS.onclose=null;marketWS.close()}catch{} marketWS=null}}
@@ -1474,10 +1507,10 @@ function startMarketWS(){
  marketWS.onmessage=ev=>{try{const w=JSON.parse(ev.data),d=w.data||w,stream=String(w.stream||'');const sym=d.s||stream.split('@')[0];const name=wsSymbolToBase(sym);
    if(d.e==='24hrMiniTicker')updateLiveDom(name,{price:+d.c});
    else if(Array.isArray(d.bids)&&Array.isArray(d.asks))updateLiveDom(name,{bid:+d.bids?.[0]?.[0],ask:+d.asks?.[0]?.[0]});
-    else if(d.e==='kline'&&d.k){updateLiveDom(name,{price:+d.k.c});if(d.k.x){const iv=d.k.i;if(iv==='15m'||iv==='1h'){const boundary=Number(d.k.T||Date.now())+1;setTimeout(()=>run({auto:true,hourly:iv==='1h',boundary}),1800)}}}
+    else if(d.e==='kline'&&d.k){updateLiveDom(name,{price:+d.k.c});if(d.k.x){const iv=d.k.i;if(iv==='15m'||iv==='1h'){const boundary=Number(d.k.T||Date.now())+1;setTimeout(()=>{run({auto:true,hourly:iv==='1h',boundary});if(name===currentManualCoin)recheckManualCoin();},1800)}}}
  }catch(e){}};
  marketWS.onerror=()=>{$('liveTrack').textContent='REST YEDEK';for(const n of names)fetchPositionDepthSnapshot(n)};
- marketWS.onclose=()=>{marketWS=null;$('liveTrack').textContent='REST YEDEK • WS YENİDEN BAĞLANIYOR';for(const n of names){const w=$('ws_'+n);if(w){w.textContent='● REST yedek / yeniden bağlanıyor';w.className='wsOff'}fetchPositionDepthSnapshot(n)};wsRetryTimer=setTimeout(startMarketWS,2500)};
+ marketWS.onclose=()=>{marketWS=null;$('liveTrack').textContent='REST YEDEK • WS YENİDEN BAĞLANIYOR';for(const n of names){refreshEntryQuoteDom(n);fetchPositionDepthSnapshot(n)};wsRetryTimer=setTimeout(startMarketWS,2500)};
 }
 async function liveRefresh(){return;}
 function startLiveTracking(){startMarketWS();}

@@ -61,7 +61,7 @@ self.addEventListener('notificationclick',event=>{
 self.addEventListener('periodicsync',event=>{
   if(event.tag==='coin-quarter-hour'){
     event.waitUntil(
-      self.registration.showNotification('Coin Analiz V5.0',{
+      self.registration.showNotification('Coin Analiz V5.1',{
         body:'Yeni 15 dakikalık kontrol zamanı. Güncel analiz için Coin Analiz’i açın.',
         icon:'./ikon-192.png',
         badge:'./ikon-192.png',

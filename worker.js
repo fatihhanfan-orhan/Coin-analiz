@@ -1,4 +1,4 @@
-// Coin Analiz V5.0 FINAL Worker — hızlı pozisyon alarmı + 15dk/1saat arka plan push
+// Coin Analiz V5.1 Worker — hızlı pozisyon alarmı + 15dk/1saat arka plan push
 // Analiz, giriş ve çıkış kararlarının tamamı aynı borsanın (Binance TR) TRY piyasasını kullanır.
 const BINANCE_24H_URLS = [
   'https://api.binance.me/api/v3/ticker/24hr',
@@ -31,8 +31,8 @@ export default {
         const state = await loadState(env);
         return json({
           ok: true,
-          service: 'Coin Analiz Worker V5.0 — 7/24 Bildirim',
-          version: '5.0-WORKER-15-DENETIMLI',
+          service: 'Coin Analiz Worker V5.1 — 7/24 Bildirim',
+          version: '5.1-QUOTE',
           kvConfigured: Boolean(env.COIN_KV),
           oneSignalAppIdConfigured: Boolean(env.ONESIGNAL_APP_ID),
           oneSignalApiKeyConfigured: Boolean(env.ONESIGNAL_API_KEY),
@@ -58,6 +58,15 @@ export default {
           dataSource: 'Binance TR TRY — tarayıcı REST + Worker WebSocket BID',
           recommendedCrons: ['* * * * *']
         });
+      }
+
+      if (url.pathname === '/quote' && request.method === 'GET') {
+        const name=String(url.searchParams.get('coin')||'');
+        if(!/^[A-Z0-9]{2,20}$/.test(name)||EXCLUDED_BASES.has(name))return json({ok:false,error:'Geçersiz coin'},400);
+        const book=await fetchBinanceTrBookTicker(name,3500);
+        const response=json({...book,at:Date.now()});
+        response.headers.set('Cache-Control','no-store');
+        return response;
       }
 
       if (url.pathname === '/tracked') {
@@ -178,6 +187,7 @@ export default {
     }));
   }
 };
+
 
 async function backgroundCycle(env, opts = {}) {
   const previous = await loadState(env);
@@ -525,7 +535,7 @@ async function fetchBinanceTrBookTicker(name, timeoutMs = 10000) {
           const row = parsed?.data || parsed;
           const bid = Number(row?.bids?.[0]?.[0] || row?.b?.[0]?.[0] || row?.bidPrice),
                 ask = Number(row?.asks?.[0]?.[0] || row?.a?.[0]?.[0] || row?.askPrice);
-          if (!(bid > 0) || !(ask > 0)) throw new Error('BID/ASK alanı eksik');
+          if (!(bid > 0) || !(ask >= bid)) throw new Error('BID/ASK alanı eksik veya geçersiz');
           resolve({symbol:clean+'TRY', bidPrice:String(bid), askPrice:String(ask), b:String(bid), a:String(ask), source:'BINANCE_TR_WS'});
         } catch (error) { reject(error); }
       }, {once:true});
@@ -1134,6 +1144,7 @@ async function sendOneSignal(env,alerts){
       appUrl.hash='position-'+cleanBase(alerts[0].name);
     }
   }
+
 
   const r=await fetch('https://api.onesignal.com/notifications',{
     method:'POST',
