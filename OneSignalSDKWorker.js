@@ -1,4 +1,6 @@
+importScripts('./critical-alarm-sw.js');
 self.addEventListener('notificationclick', event => {
+  if(event.notification?.data?.notificationId)return; // OneSignal owns remote click navigation/analytics.
   event.stopImmediatePropagation();
   event.notification.close();
   event.waitUntil((async () => {
