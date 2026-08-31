@@ -196,15 +196,36 @@ function entryState(d,name=''){
  if(acceleratingOut||flow.distribution)return{key:'FLOW_RISK',label:'ALMA — HIZLANAN PARA ÇIKIŞI',tone:'red',hard:true};
  const momentum=(m.hist>m.prevHist?1:0)+(m.kdjK>m.kdjD?1:0)+(m.price>m.lastOpen?1:0)+(m.rsi6>=m.rsi12?1:0),hold=!rec.confirmedSupportBreak&&!rec.fourHourFalling&&(rec.higherLow||rec.base||rec.reclaim||Number(p.dist)<0),flowOk=flow.status!=='REAL'||flow.m15>0||!flow.distribution,score=Number(s.buy||d.buy||0);
  if(finderRisk.pullback)return{key:'PULLBACK',label:'PULLBACK BEKLE / KOŞULLU PLAN',tone:'yellow'};
- if(p.bounce&&hold&&flowOk&&marketRR>=1.30&&score>=7)return{key:'CONFIRMED',label:'GİRİŞ UYGUN',tone:'green'};
- const conditionalSafe=conditionalBelow&&conditionalRR>=1.30&&hold&&flowOk&&momentum>=2;
- if(p.near&&conditionalEntry>=p.zoneLow&&conditionalEntry<=p.zoneHigh&&!p.bounce&&hold&&flowOk)return{key:'LIMIT_WAIT',label:'LİMİT BÖLGESİNDE — TEYİT BEKLE',tone:'yellow'};
+ const quality=finderEntryQuality(d);if(quality.reason)return{key:'FILTERED',label:quality.reason,tone:'yellow',hard:true};
+ if(p.bounce&&hold&&flowOk&&marketRR>=1.30&&quality.marketEligible&&score>=7)return{key:'CONFIRMED',label:'GİRİŞ UYGUN',tone:'green'};
+ const conditionalSafe=quality.conditionalEligible&&conditionalBelow&&conditionalRR>=1.30&&hold&&flowOk&&momentum>=2;
+ if(quality.marketEligible&&p.near&&conditionalEntry>=p.zoneLow&&conditionalEntry<=p.zoneHigh&&!p.bounce&&hold&&flowOk)return{key:'LIMIT_WAIT',label:'LİMİT BÖLGESİNDE — TEYİT BEKLE',tone:'yellow'};
  if(conditionalSafe)return{key:'CONDITIONAL',label:'KOŞULLU GİRİŞ HAZIR',tone:'yellow'};
- if((p.near||Number(p.dist)<=2)&&hold&&flowOk&&momentum>=2)return{key:'EARLY',label:'ERKEN FIRSAT / HAZIRLAN',tone:'yellow'};
+ if(quality.marketEligible&&(p.near||Number(p.dist)<=2)&&hold&&flowOk&&momentum>=2)return{key:'EARLY',label:'ERKEN FIRSAT / HAZIRLAN',tone:'yellow'};
  return{key:'WATCH',label:'İZLE',tone:'yellow'};
 }
 function moneyFlowModel(d){const f=d?.flow||{};return{m15:Number(f.m15?.net),m30:Number(f.m30?.net),h1:Number(f.h1?.net),large:Number(f.orders?.large),medium:Number(f.orders?.medium),small:Number(f.orders?.small),status:f.status||'VERİ YOK',distribution:!!f.distribution}}
-function finderRiskFlags(x){const p=x?.p||{},m=x?.m||{},h=x?.h||{},rec=p.recovery||{},flow=moneyFlowModel(x),drops=rec.drops||{},severeDrop=Number(drops.d3)<=-8||Number(drops.d5)<=-12||Number(drops.d7)<=-18,weakRecovery=severeDrop&&flow.status==='REAL'&&flow.h1<0&&rec.state!=='TOPARLANMA TEYİDİ',fast15=Number(m.lastOpen)>0&&((Number(m.price)/Number(m.lastOpen)-1)*100)>=2.5,fast1h=Number(h.lastOpen)>0&&((Number(m.price)/Number(h.lastOpen)-1)*100)>=4,overheat=Number(m.rsi6)>=82||Number(m.rsi12)>=72||Number(m.rsi)>75,momentumHot=Number(m.rsi6)>=70||Number(m.rsi12)>=65||Number(m.rsi)>=68,entryGap=Number(p.marketEntry)>0&&Number(p.conditionalEntry)>0?(Number(p.marketEntry)/Number(p.conditionalEntry)-1)*100:0,anchorAdvance=Number(rec.advanceFromDipPct),multiDayAdvance=Number(rec.multiDayAdvancePct),advancedLate=anchorAdvance>=12||(anchorAdvance>=8&&(fast15||fast1h||momentumHot||entryGap>2.5))||(multiDayAdvance>=18&&(fast15||fast1h||momentumHot||entryGap>2.5)),chased=overheat||fast15||entryGap>2.5||advancedLate;return{severeDrop,weakRecovery,fast15,fast1h,overheat,momentumHot,entryGap,anchorAdvance,multiDayAdvance,advancedLate,chased,pullback:weakRecovery||chased}}
+// Finder quality uses the chosen entry, never conditional R/R as market advantage.
+function finderEntryQuality(x,kind='AUTO'){
+ const p=x?.p||{},rec=p.recovery||{},history=rec.history||{},risk=finderRiskFlags(x),target=Number(p.mainTarget),market=Number(p.marketEntry),limit=Number(p.conditionalEntry),stop=Number(p.stop);
+ const area=entry=>entry>0&&target>entry?(target-entry)/entry*100:NaN;
+ const marketProfit=area(market),conditionalProfit=area(limit);
+ const marketEligible=marketProfit>=5-1e-9&&Number(p.marketRR)>=1.30&&stop>0&&stop<market;
+ const conditionalEligible=p.supportSource==='HORIZONTAL'&&limit>stop&&limit<market&&conditionalProfit>=5-1e-9&&Number(p.conditionalRR)>=1.30;
+ const periods=['week','month','quarter','year'].map(k=>history[k]).filter(v=>(v?.complete||Number(v?.bars)>=7)&&Number(v.low)>0);
+ const historicDistance=periods.length?Math.max(...periods.map(v=>Math.max(0,(market/Number(v.low)-1)*100))):Infinity;
+ const historicalScore=periods.length?periods.reduce((sum,v)=>sum+Math.max(0,1-Math.max(0,(market/Number(v.low)-1)*100)/12),0)/periods.length*30:0;
+ const selectedKind=kind==='AUTO'?(marketEligible&&p.bounce&&Number(x.s?.buy??x.buy)>=7?'MARKET':conditionalEligible?'CONDITIONAL':'MARKET'):kind;
+ const profit=selectedKind==='MARKET'?marketProfit:selectedKind==='CONDITIONAL'?conditionalProfit:NaN;
+ const eligible=kind==='MARKET'?marketEligible:kind==='CONDITIONAL'?conditionalEligible:marketEligible||conditionalEligible;
+ const reason=risk.pullback?'GEÇ GİRİŞ / PULLBACK BEKLE':!history.week?.complete?'TARİHSEL VERİ EKSİK':historicDistance>=12?'TARİHSEL DİPTEN UZAK':!eligible?'KÂR ALANI %5 / R/R ŞARTI SAĞLANMADI':'';
+ return{selectedKind,rr:Number(selectedKind==='MARKET'?p.marketRR:p.conditionalRR),reason,marketEligible,conditionalEligible,marketProfit,conditionalProfit,profit,historicalScore,historicDistance,band:profit>=12?'ÇOK GÜÇLÜ':profit>=8?'GÜÇLÜ':profit>=5-1e-9?'NORMAL':'ELENDİ'};
+}
+function compareFinderQuality(a,b){
+ const qa=finderEntryQuality(a),qb=finderEntryQuality(b);
+ return qb.historicalScore-qa.historicalScore||qa.historicDistance-qb.historicDistance||Number(a.p?.recovery?.advanceFromDipPct||0)-Number(b.p?.recovery?.advanceFromDipPct||0)||Math.abs(Number(a.p?.dist)||0)-Math.abs(Number(b.p?.dist)||0)||qb.profit-qa.profit||qb.rr-qa.rr||Number(b.candidate||0)-Number(a.candidate||0);
+}
+function finderRiskFlags(x){const p=x?.p||{},m=x?.m||{},h=x?.h||{},rec=p.recovery||{},flow=moneyFlowModel(x),drops=rec.drops||{},severeDrop=Number(drops.d3)<=-8||Number(drops.d5)<=-12||Number(drops.d7)<=-18,weakRecovery=severeDrop&&flow.status==='REAL'&&flow.h1<0&&rec.state!=='TOPARLANMA TEYİDİ',fast15=Number(m.lastOpen)>0&&((Number(m.price)/Number(m.lastOpen)-1)*100)>=2.5,fast1h=Number(h.lastOpen)>0&&((Number(m.price)/Number(h.lastOpen)-1)*100)>=4,overheat=Number(m.rsi6)>=82||Number(m.rsi12)>=72||Number(m.rsi)>75,momentumHot=Number(m.rsi6)>=70||Number(m.rsi12)>=65||Number(m.rsi)>=68,entryGap=Number(p.marketEntry)>0&&Number(p.conditionalEntry)>0?(Number(p.marketEntry)/Number(p.conditionalEntry)-1)*100:0,anchorAdvance=Number(rec.advanceFromDipPct),multiDayAdvance=Number(rec.multiDayAdvancePct),recentAdvance=Number(rec.recentAdvancePct),advancedLate=recentAdvance>=12||multiDayAdvance>=18||anchorAdvance>=12||(anchorAdvance>=8&&(fast15||fast1h||momentumHot||entryGap>2.5))||(multiDayAdvance>=18&&(fast15||fast1h||momentumHot||entryGap>2.5)),chased=overheat||fast15||entryGap>2.5||advancedLate;return{severeDrop,weakRecovery,fast15,fast1h,overheat,momentumHot,entryGap,anchorAdvance,multiDayAdvance,recentAdvance,advancedLate,chased,pullback:weakRecovery||chased}}
 function flowLabel(v){return Number.isFinite(v)?(v>0?'GİRİŞ':v<0?'ÇIKIŞ':'NÖTR'):'VERİ YOK'}
 function klineNetFlow(rows,count){const a=(rows||[]).slice(-count),quote=a.reduce((s,x)=>s+(+x[7]||0),0),buy=a.reduce((s,x)=>s+(+x[10]||0),0);return{status:quote>0?'REAL':'VERİ YOK',net:quote>0?buy-(quote-buy):NaN,quote}}
 function percentile(a,p){if(!a.length)return NaN;const s=[...a].sort((x,y)=>x-y);return s[Math.min(s.length-1,Math.floor((s.length-1)*p))]}
@@ -220,23 +241,23 @@ function uniqueLevels(values){return [...new Set(values.filter(Number.isFinite).
 // Only completed candles available at this 15-minute close may define history/targets.
 function recoveryHistory(k15,k1h,k4h,k1d,price){
  const asOf=Number(k15?.at(-1)?.[6]);
- const closed=rows=>(rows||[]).filter(r=>Number.isFinite(Number(r[6]))&&Number(r[6])<=asOf);
+ const closed=rows=>[...new Map((rows||[]).filter(r=>Number.isFinite(Number(r[6]))&&Number(r[6])<=asOf&&Number(r[3])>0&&Number(r[2])>=Number(r[3])).map(r=>[Number(r[0]),r])).values()].sort((a,b)=>a[0]-b[0]);
  const intraday=closed(k15),hourly=closed(k1h),fourHourly=closed(k4h),daily=closed(k1d);
  const context={};
- for(const [name,days] of [['day',1],['week',7],['month',30],['year',365]]){
+ for(const [name,days] of [['day',1],['week',7],['month',30],['quarter',90],['year',365]]){
   const rows=days===1?intraday.filter(r=>Number(r[0])>asOf-86400000):daily.slice(-days);
   const lows=rows.map(r=>Number(r[3])).filter(x=>x>0),highs=rows.map(r=>Number(r[2])).filter(x=>x>0);
   const low=lows.length?Math.min(...lows):NaN,high=highs.length?Math.max(...highs):NaN;
-  context[name]={low,high,bars:rows.length,complete:days===1?rows.length>=96:rows.length>=days,distancePct:low>0?(price/low-1)*100:NaN};
+  context[name]={low,high,bars:rows.length,complete:(days===1?rows.length>=96:rows.length>=days)&&rows.every((r,i)=>i===0||Number(r[0])-Number(rows[i-1][0])===(days===1?900000:86400000)),distancePct:low>0?(price/low-1)*100:NaN};
  }
  // Keep the current reversal's confirmed low across midnight and higher lows.
  // Older 3/5/7-day floors remain separate context, not a forced intraday entry anchor.
  const floors=[3,5,7].map(days=>Math.min(...daily.slice(-days).map(r=>Number(r[3])).filter(x=>x>0))).filter(Number.isFinite);
- const multiDayReference=floors.length?Math.max(...floors):NaN;
+ const multiDayReference=floors.length?Math.min(...floors):NaN;
  const recentLows=intraday.map(r=>Number(r[3])).filter(x=>x>0);
  const pivots=swingLevels(intraday,'low',2,220);
  let dipReference=NaN,previousPivot=NaN;
- for(const low of pivots){if(!Number.isFinite(dipReference)||low<previousPivot)dipReference=low;previousPivot=low;}
+ for(const low of pivots){dipReference=Number.isFinite(dipReference)?Math.min(dipReference,low):low;}
  if(!Number.isFinite(dipReference))dipReference=recentLows.length?Math.min(...recentLows):NaN;
  const micro=swingLevels(intraday,'high',2,120);
  // Confirmed higher-timeframe swings, not an arbitrary second micro resistance.
@@ -253,9 +274,15 @@ function enrichRecoveryPlan(p,k15,k1h,k4h,k1d,m,h,flow,spread){
  const daily=k1d.slice(-8),dailyHighs=daily.map(x=>+x[2]),res=history.resistances;
  const {interimTarget,mainTarget,nextTarget}=history;
  p.resistances=res;p.interimTarget=interimTarget;p.mainTarget=mainTarget;p.t1=interimTarget;p.t2=mainTarget;p.t3=nextTarget;p.hasResistance=Number.isFinite(interimTarget);p.marketEntry=price;p.conditionalEntry=price>p.zoneHigh&&p.supportSource==='HORIZONTAL'?p.zoneHigh:price;p.earlyEntry=p.conditionalEntry;p.marketRR=p.hasResistance&&price>p.stop&&mainTarget>price?(mainTarget-price)/(price-p.stop):NaN;p.conditionalRR=p.hasResistance&&p.conditionalEntry>p.stop&&mainTarget>p.conditionalEntry?(mainTarget-p.conditionalEntry)/(p.conditionalEntry-p.stop):NaN;p.rr=p.conditionalRR;
- const drops={};for(const days of [3,5,7]){const w=daily.slice(-days),peak=Math.max(...w.map(x=>+x[2]).filter(Number.isFinite));drops['d'+days]=peak>0?(price/peak-1)*100:NaN}
+  const drops={},drawdowns={},changeReferenceAt={};
+  for(const days of [3,5,7]){
+   const cutoff=history.asOf-days*86400000,prior=[...k15,...k1h,...k1d].filter(r=>Number(r[6])<=cutoff).sort((a,b)=>a[6]-b[6]).at(-1);
+   drops['d'+days]=prior&&Number(prior[4])>0?(price/Number(prior[4])-1)*100:NaN;changeReferenceAt['d'+days]=prior?.[6]??null;
+   const w=k1d.slice(-days),peak=Math.max(...w.map(x=>+x[2]).filter(Number.isFinite));drawdowns['d'+days]=peak>0?(price/peak-1)*100:NaN;
+  }
+  const recentRows=[...k15,...k1h,...k1d].filter(r=>Number(r[6])>history.asOf-3*86400000),recentFloor=Math.min(...recentRows.map(r=>Number(r[3])).filter(v=>v>0)),recentAdvancePct=recentFloor>0?(price/recentFloor-1)*100:NaN;
  const priorPeak=Math.max(...dailyHighs.filter(Number.isFinite)),maxRecoveryPct=profitFrom(price,priorPeak),lows15=swingLevels(k15,'low',2,80),higherLow=lows15.length>=2&&lows15.at(-1)>lows15.at(-2)*1.001,dipReference=history.dipReference,advanceFromDipPct=dipReference>0?(price/dipReference-1)*100:NaN,multiDayReference=history.multiDayReference,multiDayAdvancePct=multiDayReference>0?(price/multiDayReference-1)*100:NaN,closes15=(k15||[]).slice(-2).map(x=>+x[4]),closes4h=(k4h||[]).slice(-3).map(x=>+x[4]),lows4h=(k4h||[]).slice(-3).map(x=>+x[3]),fourHourHold=closes4h.length>=2&&closes4h.at(-1)>=closes4h.at(-2),fourHourFalling=closes4h.length===3&&closes4h[2]<closes4h[1]&&closes4h[1]<closes4h[0]&&lows4h[2]<=lows4h[1],lastDailyLow=+daily.at(-1)?.[3],previousDailyLows=daily.slice(0,-1).map(x=>+x[3]).filter(Number.isFinite),newLow=previousDailyLows.length&&lastDailyLow<=Math.min(...previousDailyLows),recent15=(k15||[]).slice(-4),range15=recent15.length?Math.max(...recent15.map(x=>+x[2]))-Math.min(...recent15.map(x=>+x[3])):Infinity,base=range15<=Math.max(Number(p.atr)||0,price*.012),reclaim=Number(m.price)>=Number(p.support)&&Number(m.lastLow)<Number(p.support),volume=Number(m.vol)>=Number(m.vma5),money=flow?.m15?.status==='REAL'&&flow.m15.net>0&&!flow.distribution,rsi=Number(m.rsi6)>=Number(m.rsi12)&&Number(m.rsi)>=35,kdj=Number(m.kdjK)>Number(m.kdjD),ema=Number(m.ema9)>=Number(m.ema21),macd=Number(m.hist)>Number(m.prevHist),boll=Number(m.price)>=Number(m.bollDn),spreadOk=Number(spread)<=.35,sellingPressure=flow?.status==='REAL'&&flow.m15?.net<0&&flow.m30?.net<0&&(flow.h1?.net<0||flow.orders?.large<0),confirmedSupportBreak=closes15.length===2&&closes15.every(x=>x<p.zoneLow)&&sellingPressure,confirmations=[higherLow,base,reclaim,fourHourHold,volume,money,rsi,kdj,ema,macd,boll,spreadOk].filter(Boolean).length,stabilized=!confirmedSupportBreak&&!fourHourFalling&&(higherLow||base||reclaim),state=confirmedSupportBreak?'DESTEK KIRILDI — AL YOK':newLow?'YENİ DİP — İZLE':fourHourFalling?'DÜŞÜŞ SÜRÜYOR — AL YOK':stabilized&&confirmations>=7?'TOPARLANMA TEYİDİ':stabilized?'YATAY / İZLE':'DESTEK GERİ KAZANIMI / İZLE';
- p.recovery={history:history.context,asOf:history.asOf,drops,higherLow,base,reclaim,fourHourHold,fourHourFalling,newLow,sellingPressure,confirmedSupportBreak,confirmations,state,dipReference,advanceFromDipPct,multiDayReference,multiDayAdvancePct,nearTarget:p.interimTarget,mainTarget:p.mainTarget,maxRecoveryLevel:priorPeak,maxRecoveryPct,guaranteed:false};return p;
+ p.recovery={history:history.context,asOf:history.asOf,drops,drawdowns,changeReferenceAt,recentAdvancePct,higherLow,base,reclaim,fourHourHold,fourHourFalling,newLow,sellingPressure,confirmedSupportBreak,confirmations,state,dipReference,advanceFromDipPct,multiDayReference,multiDayAdvancePct,nearTarget:p.interimTarget,mainTarget:p.mainTarget,maxRecoveryLevel:priorPeak,maxRecoveryPct,guaranteed:false};return p;
 }
 function watchRankScore(r){const d=r.data||{},p=d.p||{},m=d.m||{},h=d.h||{},flow=moneyFlowModel(d),dist=Math.abs(Number(p.dist||9)),flowPts=Number.isFinite(flow.m15)?Math.sign(flow.m15)*Math.min(8,Math.log10(Math.abs(flow.m15)+1)):0;return (Math.max(0,3-dist)*9)+(p.bounce?13:0)+(m.hist>m.prevHist?8:0)+(m.kdjK>m.kdjD?6:0)+(h.ema9>h.ema21?8:0)+Math.min(10,Number(d.rpot?.upside1||0)*2)+Math.min(10,Number(p.rr||0)*2)+Math.max(0,8-Number(d.spread||1)*20)+flowPts}
 function ema(a,p){const o=Array(a.length).fill(NaN),k=2/(p+1),seed=[];let s=NaN,ready=false;for(let i=0;i<a.length;i++){const x=Number(a[i]);if(!Number.isFinite(x))continue;if(!ready){seed.push(x);if(seed.length===p){s=seed.reduce((u,v)=>u+v,0)/p;o[i]=s;ready=true}}else{s=x*k+s*(1-k);o[i]=s}}return o}
@@ -396,7 +423,7 @@ function referenceModel(key,current,trigger){
  const n=parseUiNumber(current),missing=!Number.isFinite(n)||/VERİ YOK|^—$/.test(current);let title='',reference='',status='',text='';
  if(key==='spread'){title='SPREAD';reference='İstenen: ≤ %0,35';status=missing?'VERİ YOK ⚪':n<=.35?'UYGUN 🟢':'YÜKSEK / UYGUNSUZ 🔴';text='Spread, alış ve satış fiyatı arasındaki farktır. Daha düşük olması işlem açısından genellikle daha uygundur.'}
  else if(key==='rr'){title='RİSK / KAZANÇ (R:R)';reference='Minimum: 1:1,30';status=missing?'VERİ YOK ⚪':n>=1.30?'UYGUN 🟢':'YETERSİZ 🔴';text='D1 için beklenen kazancın teknik stop riskine oranıdır. Hard-gate minimum 1:1,30 ister.'}
- else if(key==='d1area'){title='GERÇEK D1 KÂR ALANI';reference='%3 kalite referansıdır';status=missing?'VERİ YOK ⚪':n>=3?'GÜÇLÜ ALAN 🟢':'DÜŞÜK ALAN / UYARI 🟡';text='Koşullu girişten doğrulanmış Ana D1 seviyesine kadar kalan brüt alandır. %3 eleme kapısı değil, kalite ve sıralama referansıdır.'}
+ else if(key==='d1area'){title='GERÇEK D1 KÂR ALANI';reference='%5 minimum kâr alanı';status=missing?'VERİ YOK ⚪':n>=5?'UYGUN ALAN 🟢':'DÜŞÜK ALAN / UYARI 🟡';text='Koşullu girişten doğrulanmış Ana D1 seviyesine kadar kalan brüt alandır. %5 altı elenir; %5–8 normal, %8–12 güçlü, %12 ve üzeri çok güçlüdür.'}
  else if(key==='supportDistance'){title='DESTEĞE MESAFE';reference='Kabul alanı: %0–%3';status=missing?'VERİ YOK ⚪':n<0?'DESTEK ALTI / RİSKLİ 🔴':n<=3?'UYGUN ARALIK 🟢':'GEÇ KALINDI 🔴';text='Pozitif değer fiyatın geçerli destek bölgesinin üzerinde ne kadar uzakta olduğunu gösterir. Negatif değer destek altını ifade eder.'}
  else if(key==='rsi'){title='RSI';reference='Tek bir ideal referans yok';status=missing?'VERİ YOK ⚪':n>78?'AŞIRI YÜKSEK / GİRİŞ RİSKİ 🔴':n>72?'YÜKSEK / DİKKAT 🟡':n>=42&&n<=68?'GİRİŞ TEYİDİYLE UYUMLU 🟢':'MOMENTUM TEYİDİ ZAYIF 🟡';text='Motor RSI’ı tek başına karar yapmaz. Destek dönüşünde 42–68 aralığını, aşırı ısınmada 72 ve 78 üzerini diğer göstergelerle birlikte değerlendirir.'}
  else if(key==='volume'){const card=trigger?.closest('.coin'),ma=referenceCurrent(card?.querySelectorAll('.metric')?[...card.querySelectorAll('.metric')].find(x=>x.querySelector('b')?.textContent.trim()==='VOL MA5')?.querySelector('span'):null);const maN=parseUiNumber(ma);title='HACİM GÜCÜ';reference='Sabit ideal rakam yok';status=missing||!Number.isFinite(maN)?'VERİ YOK ⚪':n>=maN?'MA5 ÜSTÜ / GÜÇLÜ 🟢':'MA5 ALTI / ZAYIF 🟡';text='Motor mevcut hacmi kendi 5 mumluk hacim ortalamasıyla karşılaştırır; mutlak bir hacim eşiği uydurulmaz.'}
@@ -424,7 +451,7 @@ function planUI(p,m,h){
   <div class="planbox"><b>${refLabel('KOŞULLU LİMİT R/R','rr')}</b><span>1 : ${fmt(Math.max(0,p.conditionalRR),2)}</span></div>
   <div class="planbox"><b>${refLabel('KOŞULLU ANA D1 KÂR ALANI','d1area')}</b><span>${Number.isFinite(d1Area)?'%'+fmt(d1Area,2):'VERİ YOK'}</span></div>
   <div class="planbox"><b>DÖNÜŞ TEYİDİ</b><span class="${p.bounce?'near':'far'}">${p.bounce?'VAR':'BEKLENİYOR'}</span></div>
- </div>${p.recovery?`<div class="respot"><b>3/5/7 GÜNLÜK DÖNÜŞ</b><strong class="${p.recovery.state==='TOPARLANMA TEYİDİ'?'potgood':p.recovery.newLow?'potbad':'potmid'}">${p.recovery.state}</strong><small>Yakın hedef +%${fmt(profitFrom(m.price,p.t1),2)} • Ana hedef +%${fmt(profitFrom(m.price,p.t2||p.t1),2)}</small><small>Hareket dip referansı: ${fmt(p.recovery.dipReference,6)} • bu referanstan ilerleme +%${fmt(p.recovery.advanceFromDipPct,2)}</small><small>Geçmiş dip uzaklığı — 1g %${fmt(p.recovery.history?.day?.distancePct,2)} • 1hft %${fmt(p.recovery.history?.week?.distancePct,2)} • 1ay %${fmt(p.recovery.history?.month?.distancePct,2)} • 1yıl %${fmt(p.recovery.history?.year?.distancePct,2)}${p.recovery.history?.year?.complete?'':' • 1 yıllık geçmiş eksik'}</small><small>Maksimum toparlanma alanı ≈ +%${fmt(p.recovery.maxRecoveryPct,2)} • kesin/garanti hedef değildir</small></div>`:''}<div class="tiny">Destek için doğrulanmış 15 dk / 1 saat yatay dipler önceliklidir. Yatay destek yoksa EMA21/Bollinger yalnız dinamik referanstır; tek başına koşullu limit planı üretmez. Stop/hedefler teknik referanstır; garanti değildir.${entryGuideHTML(p,m,h)}</div></div>`;
+ </div>${p.recovery?`<div class="respot"><b>3/5/7 GÜNLÜK DÖNÜŞ</b><strong class="${p.recovery.state==='TOPARLANMA TEYİDİ'?'potgood':p.recovery.newLow?'potbad':'potmid'}">${p.recovery.state}</strong><small>Yakın hedef +%${fmt(profitFrom(m.price,p.t1),2)} • Ana hedef +%${fmt(profitFrom(m.price,p.t2||p.t1),2)}</small><small>Hareket dip referansı: ${fmt(p.recovery.dipReference,6)} • bu referanstan ilerleme +%${fmt(p.recovery.advanceFromDipPct,2)}</small><small>Geçmiş dip uzaklığı — 1g %${fmt(p.recovery.history?.day?.distancePct,2)} • 1hft %${fmt(p.recovery.history?.week?.distancePct,2)} • 1ay %${fmt(p.recovery.history?.month?.distancePct,2)} • 90g %${fmt(p.recovery.history?.quarter?.distancePct,2)} • 1yıl %${fmt(p.recovery.history?.year?.distancePct,2)}${p.recovery.history?.year?.complete?'':' • 1 yıllık geçmiş eksik'}</small><small>Maksimum toparlanma alanı ≈ +%${fmt(p.recovery.maxRecoveryPct,2)} • kesin/garanti hedef değildir</small></div>`:''}<div class="tiny">Destek için doğrulanmış 15 dk / 1 saat yatay dipler önceliklidir. Yatay destek yoksa EMA21/Bollinger yalnız dinamik referanstır; tek başına koşullu limit planı üretmez. Stop/hedefler teknik referanstır; garanti değildir.${entryGuideHTML(p,m,h)}</div></div>`;
 }
 
 function supportProximityScore(p){
@@ -453,7 +480,7 @@ function card(name,data,error){
 function entryGuide(p,m,h){
   const price=Number(m?.price||0);
   const lo=Number(p?.zoneLow||0), hi=Number(p?.zoneHigh||0);
-  if(p?.bounce){
+  if(p?.bounce&&!finderEntryQuality({p,m,h},'MARKET').reason){
     return {cls:'egGreen',title:'🟢 ALIM İÇİN UYGUN',sub:'Fiyat destek bölgesinde; hacim, RSI, EMA/MACD ve 1 saat teyidi birlikte olumlu.'};
   }
   if(lo&&hi&&(price>=lo*0.995&&price<=hi*1.015)){
@@ -500,7 +527,7 @@ async function analyze(name,opts={}){
  const m=calc(a),h=calc(b),closedPrice=m.closedPrice;
  m.price=book.ask||px;m.change=(m.price/closedPrice-1)*100;m.bid=book.bid;m.ask=book.ask;m.spread=book.spread;
  const flow=buildFlowContext(a,orders,m),p=enrichRecoveryPlan(tradePlan(a,b,m,h),a,b,k4h,daily,m,h,flow,book.spread),s=score(m,h,p),vRatio=m.vma5?m.vol/m.vma5:0;
- const opportunity={name,spread:book.spread,vRatio,m,h,p};
+ const opportunity={name,spread:book.spread,vRatio,m,h,p,s,flow};
  const rpot=resistancePotential(opportunity);
  const data={m,h,p,s,rpot,flow,bid:book.bid,ask:book.ask,spread:book.spread,analyzedAt:Date.now()};
  technicalAnalysisCache[clean]={data,expiresAt:technicalCacheExpiry()};
@@ -530,9 +557,8 @@ function resistancePotential(x){
   const rsi=Number(m.rsi||50);
   const signedDist=Number(p.dist??99), dist=Math.abs(signedDist);
 
-  let profitScore=0;
-  if(upside1<3)profitScore=0; else if(upside1<4)profitScore=4; else if(upside1<5)profitScore=5.5;
-  else if(upside1<7)profitScore=7.5; else if(upside1<10)profitScore=9; else if(upside1<15)profitScore=10; else profitScore=9.5;
+  const chosenQuality=finderEntryQuality(x),rankProfit=chosenQuality.profit;
+  const profitScore=rankProfit>=12?10:rankProfit>=8?7.5:rankProfit>=5-1e-9?5:0;
 
   let reach=0; reach+=(trend/4)*4; reach+=(Math.min(v,1.8)/1.8)*2.5;
   if(rsi>=45&&rsi<=67)reach+=1.5; else if(rsi>=38&&rsi<45)reach+=.8; else if(rsi>72)reach-=1;
@@ -546,7 +572,7 @@ function resistancePotential(x){
   const expectedEdge=Math.max(0,upside1*executionConfidence-Math.max(0,sp));
 
   // Otomatik liste: gerçek direnç, makul risk/kazanç ve sağlam spread zorunlu.
-  const eligible=!!p.hasResistance && !p.recovery?.confirmedSupportBreak && signedDist<=3.5 && rr>=1.30 && sp<=0.35;
+  const eligible=!chosenQuality.reason && !!p.hasResistance && !p.recovery?.confirmedSupportBreak && signedDist<=3.5 && chosenQuality.rr>=1.30 && sp<=0.35;
   return{score:Math.round(potScore*10)/10,upside1,upside2,rr,marketRR:Number(p.marketRR),conditionalRR:Number(p.conditionalRR),t1,t2,profitScore,reach,support,momentum,liquidity,expectedEdge:Math.round(expectedEdge*100)/100,dist,signedDist,eligible};
 }
 function potentialClass(v){return v>=7.5?'potgood':v>=5?'potmid':'potbad'}
@@ -585,18 +611,18 @@ async function findDaily3(opts={}){
    const liquid=(1-norm(Math.min(x.spread,.8),.05,.5))*8;
    const qvol=norm(Math.log10(Math.max(1,x.qv)),lmin,lmax)*2;
    const profitPts=(x.rpot?.profitScore||0)*3.0;
-   const supportPts=Math.min(30,(proximity+reversal)*1.5);
+   const supportPts=Math.min(10,(proximity+reversal)*.5);
    const reachPts2=(x.rpot?.reach||0)*2.0;
    const momentumPts=Math.min(15,volume+trend+rsi);
    const liquidPts=Math.min(5,liquid+qvol);
    const chasePenalty=d>3?Math.min(30,(d-3)*5):0, belowPenalty=d<-1.5?10:0, overheat=x.m.rsi>72?8:0;
    const recovery=x.p?.recovery||{},risk=finderRiskFlags(x),recoveryBonus=recovery.state==='TOPARLANMA TEYİDİ'?Math.min(4,Number(recovery.confirmations||0)*.45):0,dipNearBonus=risk.severeDrop&&Math.abs(d)<=1.5&&(recovery.higherLow||recovery.base||recovery.reclaim)?8:0,recoveryPenalty=recovery.newLow?20:0,weakFlowPenalty=risk.weakRecovery?12:0,weakVolumePenalty=x.vRatio<.8?10:0,fastRisePenalty=risk.chased?18:0,theoreticalBonus=Math.min(2,Math.max(0,Number(recovery.maxRecoveryPct||0))*.03);
-   x.candidate=Math.max(0,Math.min(100,profitPts+reachPts2+supportPts+momentumPts+liquidPts+recoveryBonus+dipNearBonus+theoreticalBonus-chasePenalty-belowPenalty-overheat-recoveryPenalty-weakFlowPenalty-weakVolumePenalty-fastRisePenalty));
+   x.candidate=Math.max(0,Math.min(100,finderEntryQuality(x).historicalScore+profitPts+reachPts2+supportPts+momentumPts+liquidPts+recoveryBonus+dipNearBonus+theoreticalBonus-chasePenalty-belowPenalty-overheat-recoveryPenalty-weakFlowPenalty-weakVolumePenalty-fastRisePenalty-(finderEntryQuality(x).historicDistance>=12?30:0)));
    if(x.vRatio<.8&&!bounce)x.candidate=Math.min(x.candidate,74);
   }
   for(const x of metrics)x.scanState=entryState({...x,s:score(x.m,x.h,x.p)});
-  const safeMetrics=metrics.filter(x=>!x.scanState.hard&&validPairs.has(x.name)),qualityMetrics=safeMetrics;
-  qualityMetrics.sort((a,b)=>{const rank={CONFIRMED:6,CONDITIONAL:5,LIMIT_WAIT:4,EARLY:3,PULLBACK:2,WATCH:1};return (rank[b.scanState.key]-rank[a.scanState.key])||(Number(b.rpot?.expectedEdge)-Number(a.rpot?.expectedEdge))||(b.candidate-a.candidate)});
+  const safeMetrics=metrics.filter(x=>!x.scanState.hard&&validPairs.has(x.name)),qualityMetrics=safeMetrics.filter(x=>!finderEntryQuality(x).reason&&!['WATCH','PULLBACK'].includes(x.scanState.key));
+  qualityMetrics.sort(compareFinderQuality);
   const winners=qualityMetrics.slice(0,3);
 
   lastScanCandidates=Object.fromEntries(winners.map(x=>[x.name,x]));
@@ -605,18 +631,18 @@ async function findDaily3(opts={}){
     const ok=true;
     const tracked=loadWatch().includes(x.name),st=x.scanState;
     const rec=x.p.recovery||{},flow=moneyFlowModel(x),active=loadPositions().some(p=>p.name===x.name),targetLine=`Ara ${fmt(x.p.interimTarget,6)} • Ana D1 ${fmt(x.p.mainTarget,6)}`;
-    return `<div class="cand"><b>${st.key==='CONFIRMED'?'🟢':st.key==='CONDITIONAL'||st.key==='EARLY'||st.key==='LIMIT_WAIT'?'🟡':'👁'} ${st.label} • ${i+1}. ${x.name}/TRY</b><div class="statePill ${st.tone}">${active?'ALINDI / TAKİPTE':st.label}</div><div class="cp ${x.candidate>=75?'good':x.candidate>=60?'mid':''}">${x.candidate.toFixed(0)}/100</div><small>Piyasa ${fmt(x.p.marketEntry,6)} • koşullu ${fmt(x.p.conditionalEntry,6)} • uzaklık %${fmt((x.p.marketEntry/x.p.conditionalEntry-1)*100,2)}</small><small>Piyasa R/R 1:${fmt(x.p.marketRR,2)} • koşullu R/R 1:${fmt(x.p.conditionalRR,2)}</small><small>Ağırlıklı alan tahmini (komisyon hariç) yaklaşık +%${fmt(x.rpot.expectedEdge,2)} • brüt koşullu giriş→Ana D1 +%${fmt(x.rpot.upside1,2)}</small>${x.rpot.upside1<3?'<small class="bad">⚠️ KÂR ALANI DÜŞÜK — %3 kalite referansının altında</small>':''}<small>${targetLine}</small><small>Destek mesafesi: ${x.p.dist>0?'+':''}${x.p.dist.toFixed(2)}%</small><small>15dk hacim: ${x.vRatio.toFixed(2)}× MA5</small><small>Spread: ${x.spread.toFixed(3)}%</small><small>24s TRY hacmi: ${fmt(x.qv,0)}</small><small>Para akışı 15dk/30dk/1s: ${flow.status==='REAL'?[flow.m15,flow.m30,flow.h1].map(v=>(v>=0?'+':'')+fmt(v,0)).join(' / '):'VERİ YOK'}${flow.distribution?' • DAĞITIM RİSKİ':''}</small><div class="respot"><b>3/5/7 GÜNLÜK DÖNÜŞ + TOPARLANMA</b><strong class="${rec.state==='TOPARLANMA TEYİDİ'?'potgood':rec.confirmedSupportBreak?'potbad':'potmid'}">${rec.state||'VERİ YOK'}</strong><small>Düşüş 3g ${fmt(rec.drops?.d3,2)}% • 5g ${fmt(rec.drops?.d5,2)}% • 7g ${fmt(rec.drops?.d7,2)}%</small><small>Maksimum toparlanma alanı ≈ +%${fmt(rec.maxRecoveryPct,2)}</small></div><button class="trackBtn ${tracked||active?'tracked':''}" ${tracked||active?'disabled':''} onclick="trackOpportunity('${x.name}',this)">${active?'✅ ALINDI / TAKİPTE':tracked?'✅ TAKİPTE':'👁️ TAKİBE AL'}</button></div>`;
+    return `<div class="cand"><b>${st.key==='CONFIRMED'?'🟢':st.key==='CONDITIONAL'||st.key==='EARLY'||st.key==='LIMIT_WAIT'?'🟡':'👁'} ${st.label} • ${i+1}. ${x.name}/TRY</b><div class="statePill ${st.tone}">${active?'ALINDI / TAKİPTE':st.label}</div><div class="cp ${x.candidate>=75?'good':x.candidate>=60?'mid':''}">${x.candidate.toFixed(0)}/100</div><small>Piyasa ${fmt(x.p.marketEntry,6)} • koşullu ${fmt(x.p.conditionalEntry,6)} • uzaklık %${fmt((x.p.marketEntry/x.p.conditionalEntry-1)*100,2)}</small><small>Piyasa R/R 1:${fmt(x.p.marketRR,2)} • koşullu R/R 1:${fmt(x.p.conditionalRR,2)}</small><small>Ağırlıklı alan tahmini (komisyon hariç) yaklaşık +%${fmt(x.rpot.expectedEdge,2)} • brüt koşullu giriş→Ana D1 +%${fmt(x.rpot.upside1,2)}</small>${x.rpot.upside1<5?'<small class="bad">⚠️ KÂR ALANI DÜŞÜK — %5 minimum kâr alanının altında</small>':''}<small>Girişe göre kâr sınıfı: ${finderEntryQuality(x,st.key==='CONDITIONAL'?'CONDITIONAL':'MARKET').band}</small><small>${targetLine}</small><small>Destek mesafesi: ${x.p.dist>0?'+':''}${x.p.dist.toFixed(2)}%</small><small>15dk hacim: ${x.vRatio.toFixed(2)}× MA5</small><small>Spread: ${x.spread.toFixed(3)}%</small><small>24s TRY hacmi: ${fmt(x.qv,0)}</small><small>Para akışı 15dk/30dk/1s: ${flow.status==='REAL'?[flow.m15,flow.m30,flow.h1].map(v=>(v>=0?'+':'')+fmt(v,0)).join(' / '):'VERİ YOK'}${flow.distribution?' • DAĞITIM RİSKİ':''}</small><div class="respot"><b>3/5/7 GÜNLÜK DÖNÜŞ + TOPARLANMA</b><strong class="${rec.state==='TOPARLANMA TEYİDİ'?'potgood':rec.confirmedSupportBreak?'potbad':'potmid'}">${rec.state||'VERİ YOK'}</strong><small>Değişim 3g ${fmt(rec.drops?.d3,2)}% • 5g ${fmt(rec.drops?.d5,2)}% • 7g ${fmt(rec.drops?.d7,2)}%</small><small>Maksimum toparlanma alanı ≈ +%${fmt(rec.maxRecoveryPct,2)}</small></div><button class="trackBtn ${tracked||active?'tracked':''}" ${tracked||active?'disabled':''} onclick="trackOpportunity('${x.name}',this)">${active?'✅ ALINDI / TAKİPTE':tracked?'✅ TAKİPTE':'👁️ TAKİBE AL'}</button></div>`;
   }).join('');
 
   const goodCount=winners.filter(x=>x.scanState.key==='CONFIRMED').length;
   $('scanStatus').textContent=goodCount
-    ?`✅ ${goodCount} piyasa girişi uygun; kalan kartlar koşullu/erken/pullback izleme adayıdır.`
-    :'🟡 Uygun piyasa AL yok; yalnız koşullu/erken/pullback izleme adayları gösteriliyor.';
+    ?`✅ ${goodCount} piyasa girişi uygun; kalan kartlar koşullu/erken teyit bekleyen adaylardır.`
+    :winners.length===0?'ŞU ANDA UYGUN FIRSAT YOK':'🟡 Uygun piyasa AL yok; yalnız koşullu/erken teyit bekleyen adaylar gösteriliyor.';
 
   if(!opts.auto4h){
     $('scanStatus').textContent=goodCount===3
-      ?'✅ Tarama tamamlandı • 3 piyasa girişi uygun • ağırlıklı alan tahminine göre sıralandı.'
-      :`🟡 Tarama tamamlandı • ${goodCount} piyasa girişi uygun • ${winners.length} koşullu/erken/pullback izleme adayı.`;
+      ?'✅ Tarama tamamlandı • 3 piyasa girişi uygun • tarihsel dip ve giriş kalitesine göre sıralandı.'
+      :winners.length===0?'ŞU ANDA UYGUN FIRSAT YOK':`🟡 Tarama tamamlandı • ${goodCount} piyasa girişi uygun • ${winners.length} koşullu/erken teyit bekleyen aday.`;
   }else{
     const body=winners.map((x,i)=>`${i+1}. ${x.name}/TRY • koşullu→Ana D1 brüt +%${fmt(x.rpot?.upside1,2)} • fırsat ${fmt(x.candidate,0)}/100`).join(' • ');
     try{await showSystemNotification('🔎 4 Saatlik Yeni Coin Taraması',body,'coin-4h-scan')}catch(e){console.warn('4 saatlik tarama bildirimi gönderilemedi:',e)}

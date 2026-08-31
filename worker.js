@@ -113,7 +113,7 @@ export default {
             catch (e) { analyzed.push({ name, error: String(e?.message || e) }); }
           }
         }
-        const good = analyzed.filter(x => !('error' in x) && !hardGateReason(x));
+        const good = analyzed.filter(x => !('error' in x) && !hardGateReason(x) && !['WATCH','PULLBACK'].includes(candidateState(x)));
         if (!good.length) return json({ ok:false, error:'Takip için geçerli veri alınamadı.', details:analyzed }, 422);
 
         const previous = await loadState(env);
@@ -203,7 +203,7 @@ async function backgroundCycle(env, opts = {}) {
     tickerMap = market.tickerMap || new Map();
     bookMap = market.bookMap || new Map();
     validPairs = market.validPairs || new Set();
-    marketTop3 = market.metrics.filter(x=>{return !hardGateReason(x);}).sort(compareCandidateState).slice(0,TRACK_COUNT);
+    marketTop3 = market.metrics.filter(x=>{return !hardGateReason(x)&&!['WATCH','PULLBACK'].includes(candidateState(x));}).sort(compareCandidateState).slice(0,TRACK_COUNT);
   } else {
     const [tickers, books] = await Promise.all([
       all24hTickers().catch(() => []),
@@ -375,27 +375,29 @@ async function buildPositionAlerts(env, prevList, nowList) {
     const p = prev.get(x.name);
     const d = Number(x.p?.dist ?? 99);
     const buy = Number(x.buy || 0);
-    const upside = Number(x.rpot?.upside1 || 0);
+    const decision = candidateState(x);
+    const upside = finderEntryQuality(x, decision === 'BUY' ? 'MARKET' : 'CONDITIONAL').profit;
     const price = Number(x.m?.price || 0);
     const t1 = Number(x.p?.mainTarget || x.p?.t2 || x.p?.t1 || 0);
     const targetRemaining = (price>0 && t1>0) ? ((t1-price)/price*100) : 99;
-    const buyReady = Boolean(x.p?.bounce) && Number(x.p?.marketRR)>=1.30 && buy >= 7.0 && !hardGateReason(x);
-    const conditionalReady = candidateState(x)==='CONDITIONAL';
+    const buyReady = decision === 'BUY';
+    const conditionalReady = decision === 'CONDITIONAL';
     const nearSupport = d >= -0.20 && d <= 0.80;
     const targetNear = targetRemaining >= 0 && targetRemaining <= 1.0;
     const targetHit = price>0 && t1>0 && price >= t1;
 
     const prevD = Number(p?.p?.dist ?? 99);
     const prevBuy = Number(p?.buy || 0);
-    const prevBuyReady = Boolean(p?.p?.bounce) && Number(p?.p?.marketRR)>=1.30 && prevBuy >= 7.0;
-    const prevConditionalReady = p ? (p.state==='CONDITIONAL'||candidateState(p)==='CONDITIONAL') : false;
+    const previousDecision = p ? candidateState(p) : 'REJECT';
+    const prevBuyReady = previousDecision === 'BUY';
+    const prevConditionalReady = previousDecision === 'CONDITIONAL';
     const prevNear = prevD >= -0.20 && prevD <= 0.80;
     const prevPrice = Number(p?.m?.price || 0);
     const prevT1 = Number(p?.p?.mainTarget || p?.p?.t2 || p?.p?.t1 || 0);
     const prevRemain = (prevPrice>0 && prevT1>0) ? ((prevT1-prevPrice)/prevPrice*100) : 99;
 
-    if (!p) {
-      candidates.push({type:'TRACK_NEW',name:x.name,title:`🆕 Takip: ${x.name}/TRY`,body:`Kâr potansiyeli +${fmt2(upside)}% • AL ${fmt1(buy)}/10 • desteğe ${fmtPct(d)}`});
+    if (!p && !buyReady && !conditionalReady) {
+      candidates.push({type:'TRACK_NEW',name:x.name,title:`🆕 Takip: ${x.name}/TRY`,body:'Takip kaydı oluşturuldu. Alım sinyali değildir; giriş koşulları sağlanmadı.'});
       continue;
     }
     if (buyReady && !prevBuyReady) {
@@ -404,10 +406,10 @@ async function buildPositionAlerts(env, prevList, nowList) {
     if (conditionalReady && !prevConditionalReady) {
       candidates.push({type:'CONDITIONAL_READY',name:x.name,title:`🟡 ${x.name}/TRY — KOŞULLU GİRİŞ HAZIR`,body:`Şimdi piyasa girişi değil • limit ${fmtPrice(x.p?.conditionalEntry)} • stop ${fmtPrice(x.p?.stop)} • koşullu R/K 1:${fmt2(x.p?.conditionalRR)}`});
     }
-    if (nearSupport && !prevNear) {
+    if (buyReady && nearSupport && !prevNear) {
       candidates.push({type:'SUPPORT_NEAR',name:x.name,title:`🔔 ${x.name}/TRY alım bölgesinde`,body:`Desteğe ${fmtPct(d)} • AL ${fmt1(buy)}/10 • kâr potansiyeli +${fmt2(upside)}% • teyit ${x.p?.bounce?'VAR':'BEKLENİYOR'}`});
     }
-    if (buy >= prevBuy + 1.5 && buy >= 6.5) {
+    if (buyReady && buy >= prevBuy + 1.5 && buy >= 6.5) {
       candidates.push({type:'BUY_SCORE_UP',name:x.name,title:`📈 ${x.name}/TRY AL puanı güçlendi`,body:`AL ${fmt1(prevBuy)} → ${fmt1(buy)}/10 • kâr potansiyeli +${fmt2(upside)}%`});
     }
     if (targetNear && prevRemain > 1.0) {
@@ -421,11 +423,11 @@ async function buildPositionAlerts(env, prevList, nowList) {
     }
   }
 
-  if (leader && prevLeader && leader.name !== prevLeader.name && Number(leader.rpot?.upside1||0) >= 3) {
+  if (leader && prevLeader && leader.name !== prevLeader.name && candidateState(leader) === 'BUY') {
     candidates.push({
       type:'PROFIT_LEADER',name:leader.name,
       title:`🏆 En yüksek kâr fırsatı: ${leader.name}/TRY`,
-      body:`Takip listesinin lideri değişti • Hedef-1 kâr potansiyeli +${fmt2(leader.rpot?.upside1)}% • AL ${fmt1(leader.buy)}/10`
+      body:`Takip listesinin lideri değişti • Piyasa girişinden Ana D1 kâr alanı +${fmt2(finderEntryQuality(leader,'MARKET').profit)}% • AL ${fmt1(leader.buy)}/10`
     });
   }
 
@@ -853,11 +855,31 @@ function validTryPairs(tickers,books){
 
 function hardGateReason(x){
   const p=x?.p||{},f=x?.flow||{},marketEntry=Number(p.marketEntry||x?.m?.price),conditionalEntry=Number(p.conditionalEntry),stop=Number(p.stop),marketRR=Number(p.marketRR),conditionalRR=Number(p.conditionalRR),spread=Number(x?.spread),out=f.status==='REAL'&&f.m15?.net<0&&f.m30?.net<0&&f.h1?.net<0&&Math.abs(f.m15.net)*2>Math.abs(f.m30.net);
-  if(!p.hasResistance)return 'HEDEF_YOK';if(!(spread>=0&&spread<=.35))return 'SPREAD_LIKIDITE';if(!(stop>0&&stop<marketEntry))return 'STOP_YOK';if(p.recovery?.confirmedSupportBreak)return 'DESTEK_KIRILDI';if(out||f.distribution)return 'PARA_CIKISI';if(!(marketRR>=1.30)&&!(conditionalEntry>stop&&conditionalEntry<marketEntry&&Number(p.mainTarget||p.t2||p.t1)>conditionalEntry&&conditionalRR>=1.30))return 'RR';return '';
+  if(!p.hasResistance)return 'HEDEF_YOK';if(!(spread>=0&&spread<=.35))return 'SPREAD_LIKIDITE';if(!(stop>0&&stop<marketEntry))return 'STOP_YOK';if(p.recovery?.confirmedSupportBreak)return 'DESTEK_KIRILDI';if(out||f.distribution)return 'PARA_CIKISI';if(!(marketRR>=1.30)&&!(conditionalEntry>stop&&conditionalEntry<marketEntry&&Number(p.mainTarget||p.t2||p.t1)>conditionalEntry&&conditionalRR>=1.30))return 'RR';return finderEntryQuality(x).reason;
 }
-function finderRiskFlags(x){const p=x?.p||{},m=x?.m||{},h=x?.h||{},rec=p.recovery||{},f=x?.flow||{},drops=rec.drops||{},severeDrop=Number(drops.d3)<=-8||Number(drops.d5)<=-12||Number(drops.d7)<=-18,weakRecovery=severeDrop&&f.status==='REAL'&&Number(f.h1?.net)<0&&rec.state!=='TOPARLANMA TEYİDİ',fast15=Number(m.lastOpen)>0&&((Number(m.price)/Number(m.lastOpen)-1)*100)>=2.5,fast1h=Number(h.lastOpen)>0&&((Number(m.price)/Number(h.lastOpen)-1)*100)>=4,overheat=Number(m.rsi6)>=82||Number(m.rsi12)>=72||Number(m.rsi)>75,momentumHot=Number(m.rsi6)>=70||Number(m.rsi12)>=65||Number(m.rsi)>=68,entryGap=Number(p.marketEntry)>0&&Number(p.conditionalEntry)>0?(Number(p.marketEntry)/Number(p.conditionalEntry)-1)*100:0,anchorAdvance=Number(rec.advanceFromDipPct),multiDayAdvance=Number(rec.multiDayAdvancePct),advancedLate=anchorAdvance>=12||(anchorAdvance>=8&&(fast15||fast1h||momentumHot||entryGap>2.5))||(multiDayAdvance>=18&&(fast15||fast1h||momentumHot||entryGap>2.5)),chased=overheat||fast15||entryGap>2.5||advancedLate;return{severeDrop,weakRecovery,fast15,fast1h,overheat,momentumHot,entryGap,anchorAdvance,multiDayAdvance,advancedLate,chased,pullback:weakRecovery||chased};}
-function candidateState(x){if(hardGateReason(x))return 'REJECT';const p=x.p||{},m=x.m||{},rec=p.recovery||{},hold=!rec.confirmedSupportBreak&&!rec.fourHourFalling&&(rec.higherLow||rec.base||rec.reclaim||Number(p.dist)<0),momentum=[m.hist>m.prevHist,m.kdjK>m.kdjD,m.price>m.lastOpen,m.rsi6>=m.rsi12].filter(Boolean).length,flow=x.flow||{},flowOk=flow.status!=='REAL'||flow.m15?.net>0||!flow.distribution;if(finderRiskFlags(x).pullback)return 'PULLBACK';if(p.bounce&&hold&&flowOk&&Number(p.marketRR)>=1.30&&Number(x.buy)>=7)return 'BUY';if(p.near&&Number(p.conditionalEntry)>=Number(p.zoneLow)&&Number(p.conditionalEntry)<=Number(p.zoneHigh)&&!p.bounce&&hold&&flowOk)return 'LIMIT_WAIT';if(Number(p.conditionalEntry)>Number(p.stop)&&Number(p.conditionalEntry)<Number(p.marketEntry)&&Number(p.conditionalRR)>=1.30&&hold&&flowOk&&momentum>=2)return 'CONDITIONAL';if((p.near||Number(p.dist)<=2)&&hold&&flowOk&&momentum>=2)return 'EARLY';return 'WATCH';}
-function compareCandidateState(a,b){const rank={BUY:6,CONDITIONAL:5,LIMIT_WAIT:4,EARLY:3,PULLBACK:2,WATCH:1};return (rank[candidateState(b)]-rank[candidateState(a)])||compareProfitFirst(a,b);}
+// Finder quality uses the chosen entry, never conditional R/R as market advantage.
+function finderEntryQuality(x,kind='AUTO'){
+ const p=x?.p||{},rec=p.recovery||{},history=rec.history||{},risk=finderRiskFlags(x),target=Number(p.mainTarget),market=Number(p.marketEntry),limit=Number(p.conditionalEntry),stop=Number(p.stop);
+ const area=entry=>entry>0&&target>entry?(target-entry)/entry*100:NaN;
+ const marketProfit=area(market),conditionalProfit=area(limit);
+ const marketEligible=marketProfit>=5-1e-9&&Number(p.marketRR)>=1.30&&stop>0&&stop<market;
+ const conditionalEligible=p.supportSource==='HORIZONTAL'&&limit>stop&&limit<market&&conditionalProfit>=5-1e-9&&Number(p.conditionalRR)>=1.30;
+ const periods=['week','month','quarter','year'].map(k=>history[k]).filter(v=>(v?.complete||Number(v?.bars)>=7)&&Number(v.low)>0);
+ const historicDistance=periods.length?Math.max(...periods.map(v=>Math.max(0,(market/Number(v.low)-1)*100))):Infinity;
+ const historicalScore=periods.length?periods.reduce((sum,v)=>sum+Math.max(0,1-Math.max(0,(market/Number(v.low)-1)*100)/12),0)/periods.length*30:0;
+ const selectedKind=kind==='AUTO'?(marketEligible&&p.bounce&&Number(x.s?.buy??x.buy)>=7?'MARKET':conditionalEligible?'CONDITIONAL':'MARKET'):kind;
+ const profit=selectedKind==='MARKET'?marketProfit:selectedKind==='CONDITIONAL'?conditionalProfit:NaN;
+ const eligible=kind==='MARKET'?marketEligible:kind==='CONDITIONAL'?conditionalEligible:marketEligible||conditionalEligible;
+ const reason=risk.pullback?'GEÇ GİRİŞ / PULLBACK BEKLE':!history.week?.complete?'TARİHSEL VERİ EKSİK':historicDistance>=12?'TARİHSEL DİPTEN UZAK':!eligible?'KÂR ALANI %5 / R/R ŞARTI SAĞLANMADI':'';
+ return{selectedKind,rr:Number(selectedKind==='MARKET'?p.marketRR:p.conditionalRR),reason,marketEligible,conditionalEligible,marketProfit,conditionalProfit,profit,historicalScore,historicDistance,band:profit>=12?'ÇOK GÜÇLÜ':profit>=8?'GÜÇLÜ':profit>=5-1e-9?'NORMAL':'ELENDİ'};
+}
+function compareFinderQuality(a,b){
+ const qa=finderEntryQuality(a),qb=finderEntryQuality(b);
+ return qb.historicalScore-qa.historicalScore||qa.historicDistance-qb.historicDistance||Number(a.p?.recovery?.advanceFromDipPct||0)-Number(b.p?.recovery?.advanceFromDipPct||0)||Math.abs(Number(a.p?.dist)||0)-Math.abs(Number(b.p?.dist)||0)||qb.profit-qa.profit||qb.rr-qa.rr||Number(b.candidate||0)-Number(a.candidate||0);
+}
+function finderRiskFlags(x){const p=x?.p||{},m=x?.m||{},h=x?.h||{},rec=p.recovery||{},f=x?.flow||{},drops=rec.drops||{},severeDrop=Number(drops.d3)<=-8||Number(drops.d5)<=-12||Number(drops.d7)<=-18,weakRecovery=severeDrop&&f.status==='REAL'&&Number(f.h1?.net)<0&&rec.state!=='TOPARLANMA TEYİDİ',fast15=Number(m.lastOpen)>0&&((Number(m.price)/Number(m.lastOpen)-1)*100)>=2.5,fast1h=Number(h.lastOpen)>0&&((Number(m.price)/Number(h.lastOpen)-1)*100)>=4,overheat=Number(m.rsi6)>=82||Number(m.rsi12)>=72||Number(m.rsi)>75,momentumHot=Number(m.rsi6)>=70||Number(m.rsi12)>=65||Number(m.rsi)>=68,entryGap=Number(p.marketEntry)>0&&Number(p.conditionalEntry)>0?(Number(p.marketEntry)/Number(p.conditionalEntry)-1)*100:0,anchorAdvance=Number(rec.advanceFromDipPct),multiDayAdvance=Number(rec.multiDayAdvancePct),recentAdvance=Number(rec.recentAdvancePct),advancedLate=recentAdvance>=12||multiDayAdvance>=18||anchorAdvance>=12||(anchorAdvance>=8&&(fast15||fast1h||momentumHot||entryGap>2.5))||(multiDayAdvance>=18&&(fast15||fast1h||momentumHot||entryGap>2.5)),chased=overheat||fast15||entryGap>2.5||advancedLate;return{severeDrop,weakRecovery,fast15,fast1h,overheat,momentumHot,entryGap,anchorAdvance,multiDayAdvance,recentAdvance,advancedLate,chased,pullback:weakRecovery||chased};}
+function candidateState(x){if(hardGateReason(x))return ['TARİHSEL DİPTEN UZAK','GEÇ GİRİŞ / PULLBACK BEKLE'].includes(hardGateReason(x))&&finderRiskFlags(x).pullback?'PULLBACK':'REJECT';const p=x.p||{},m=x.m||{},rec=p.recovery||{},hold=!rec.confirmedSupportBreak&&!rec.fourHourFalling&&(rec.higherLow||rec.base||rec.reclaim||Number(p.dist)<0),momentum=[m.hist>m.prevHist,m.kdjK>m.kdjD,m.price>m.lastOpen,m.rsi6>=m.rsi12].filter(Boolean).length,flow=x.flow||{},flowOk=flow.status!=='REAL'||flow.m15?.net>0||!flow.distribution;if(finderRiskFlags(x).pullback)return 'PULLBACK';if(finderEntryQuality(x).marketEligible&&p.bounce&&hold&&flowOk&&Number(p.marketRR)>=1.30&&Number(x.buy)>=7)return 'BUY';if(finderEntryQuality(x).marketEligible&&p.near&&Number(p.conditionalEntry)>=Number(p.zoneLow)&&Number(p.conditionalEntry)<=Number(p.zoneHigh)&&!p.bounce&&hold&&flowOk)return 'LIMIT_WAIT';if(finderEntryQuality(x).conditionalEligible&&Number(p.conditionalEntry)>Number(p.stop)&&Number(p.conditionalEntry)<Number(p.marketEntry)&&Number(p.conditionalRR)>=1.30&&hold&&flowOk&&momentum>=2)return 'CONDITIONAL';if(finderEntryQuality(x).marketEligible&&(p.near||Number(p.dist)<=2)&&hold&&flowOk&&momentum>=2)return 'EARLY';return 'WATCH';}
+function compareCandidateState(a,b){return compareFinderQuality(a,b);}
 
 function klineNetFlow(rows,count){const a=(rows||[]).slice(-count),quote=a.reduce((s,x)=>s+(+x[7]||0),0),buy=a.reduce((s,x)=>s+(+x[10]||0),0);return{status:quote>0?'REAL':'VERİ YOK',net:quote>0?buy-(quote-buy):NaN,quote};}
 function flowPercentile(a,p){if(!a.length)return NaN;const s=[...a].sort((x,y)=>x-y);return s[Math.min(s.length-1,Math.floor((s.length-1)*p))];}
@@ -869,23 +891,23 @@ function uniqueLevels(values){return [...new Set(values.filter(Number.isFinite).
 // Only completed candles available at this 15-minute close may define history/targets.
 function recoveryHistory(k15,k1h,k4h,k1d,price){
  const asOf=Number(k15?.at(-1)?.[6]);
- const closed=rows=>(rows||[]).filter(r=>Number.isFinite(Number(r[6]))&&Number(r[6])<=asOf);
+ const closed=rows=>[...new Map((rows||[]).filter(r=>Number.isFinite(Number(r[6]))&&Number(r[6])<=asOf&&Number(r[3])>0&&Number(r[2])>=Number(r[3])).map(r=>[Number(r[0]),r])).values()].sort((a,b)=>a[0]-b[0]);
  const intraday=closed(k15),hourly=closed(k1h),fourHourly=closed(k4h),daily=closed(k1d);
  const context={};
- for(const [name,days] of [['day',1],['week',7],['month',30],['year',365]]){
+ for(const [name,days] of [['day',1],['week',7],['month',30],['quarter',90],['year',365]]){
   const rows=days===1?intraday.filter(r=>Number(r[0])>asOf-86400000):daily.slice(-days);
   const lows=rows.map(r=>Number(r[3])).filter(x=>x>0),highs=rows.map(r=>Number(r[2])).filter(x=>x>0);
   const low=lows.length?Math.min(...lows):NaN,high=highs.length?Math.max(...highs):NaN;
-  context[name]={low,high,bars:rows.length,complete:days===1?rows.length>=96:rows.length>=days,distancePct:low>0?(price/low-1)*100:NaN};
+  context[name]={low,high,bars:rows.length,complete:(days===1?rows.length>=96:rows.length>=days)&&rows.every((r,i)=>i===0||Number(r[0])-Number(rows[i-1][0])===(days===1?900000:86400000)),distancePct:low>0?(price/low-1)*100:NaN};
  }
  // Keep the current reversal's confirmed low across midnight and higher lows.
  // Older 3/5/7-day floors remain separate context, not a forced intraday entry anchor.
  const floors=[3,5,7].map(days=>Math.min(...daily.slice(-days).map(r=>Number(r[3])).filter(x=>x>0))).filter(Number.isFinite);
- const multiDayReference=floors.length?Math.max(...floors):NaN;
+ const multiDayReference=floors.length?Math.min(...floors):NaN;
  const recentLows=intraday.map(r=>Number(r[3])).filter(x=>x>0);
  const pivots=swingLevels(intraday,'low',2,220);
  let dipReference=NaN,previousPivot=NaN;
- for(const low of pivots){if(!Number.isFinite(dipReference)||low<previousPivot)dipReference=low;previousPivot=low;}
+ for(const low of pivots){dipReference=Number.isFinite(dipReference)?Math.min(dipReference,low):low;}
  if(!Number.isFinite(dipReference))dipReference=recentLows.length?Math.min(...recentLows):NaN;
  const micro=swingLevels(intraday,'high',2,120);
  // Confirmed higher-timeframe swings, not an arbitrary second micro resistance.
@@ -902,12 +924,18 @@ function enrichRecoveryPlan(p,k15,k1h,k4h,k1d,m,h,flow,spread){
  const daily=k1d.slice(-8),dailyHighs=daily.map(x=>+x[2]),res=history.resistances;
  const {interimTarget,mainTarget,nextTarget}=history;
  p.resistances=res;p.interimTarget=interimTarget;p.mainTarget=mainTarget;p.t1=interimTarget;p.t2=mainTarget;p.t3=nextTarget;p.hasResistance=Number.isFinite(interimTarget);p.marketEntry=price;p.conditionalEntry=price>p.zoneHigh&&p.supportSource==='HORIZONTAL'?p.zoneHigh:price;p.earlyEntry=p.conditionalEntry;p.marketRR=p.hasResistance&&price>p.stop&&mainTarget>price?(mainTarget-price)/(price-p.stop):NaN;p.conditionalRR=p.hasResistance&&p.conditionalEntry>p.stop&&mainTarget>p.conditionalEntry?(mainTarget-p.conditionalEntry)/(p.conditionalEntry-p.stop):NaN;p.rr=p.conditionalRR;
-  const drops={};for(const days of [3,5,7]){const w=daily.slice(-days),peak=Math.max(...w.map(x=>+x[2]).filter(Number.isFinite));drops['d'+days]=peak>0?(price/peak-1)*100:NaN;}
+  const drops={},drawdowns={},changeReferenceAt={};
+  for(const days of [3,5,7]){
+   const cutoff=history.asOf-days*86400000,prior=[...k15,...k1h,...k1d].filter(r=>Number(r[6])<=cutoff).sort((a,b)=>a[6]-b[6]).at(-1);
+   drops['d'+days]=prior&&Number(prior[4])>0?(price/Number(prior[4])-1)*100:NaN;changeReferenceAt['d'+days]=prior?.[6]??null;
+   const w=k1d.slice(-days),peak=Math.max(...w.map(x=>+x[2]).filter(Number.isFinite));drawdowns['d'+days]=peak>0?(price/peak-1)*100:NaN;
+  }
+  const recentRows=[...k15,...k1h,...k1d].filter(r=>Number(r[6])>history.asOf-3*86400000),recentFloor=Math.min(...recentRows.map(r=>Number(r[3])).filter(v=>v>0)),recentAdvancePct=recentFloor>0?(price/recentFloor-1)*100:NaN;
   const priorPeak=Math.max(...dailyHighs.filter(Number.isFinite)),maxRecoveryPct=recoveryProfit(price,priorPeak),lows15=swingLevels(k15,'low',2,80),higherLow=lows15.length>=2&&lows15.at(-1)>lows15.at(-2)*1.001,dipReference=history.dipReference,advanceFromDipPct=dipReference>0?(price/dipReference-1)*100:NaN,multiDayReference=history.multiDayReference,multiDayAdvancePct=multiDayReference>0?(price/multiDayReference-1)*100:NaN;
   const closes15=(k15||[]).slice(-2).map(x=>+x[4]),closes4h=(k4h||[]).slice(-3).map(x=>+x[4]),lows4h=(k4h||[]).slice(-3).map(x=>+x[3]),fourHourHold=closes4h.length>=2&&closes4h.at(-1)>=closes4h.at(-2),fourHourFalling=closes4h.length===3&&closes4h[2]<closes4h[1]&&closes4h[1]<closes4h[0]&&lows4h[2]<=lows4h[1];
   const lastDailyLow=+daily.at(-1)?.[3],previousDailyLows=daily.slice(0,-1).map(x=>+x[3]).filter(Number.isFinite),newLow=previousDailyLows.length&&lastDailyLow<=Math.min(...previousDailyLows),recent15=(k15||[]).slice(-4),range15=recent15.length?Math.max(...recent15.map(x=>+x[2]))-Math.min(...recent15.map(x=>+x[3])):Infinity,base=range15<=Math.max(Number(p.atr)||0,price*.012),reclaim=Number(m.price)>=Number(p.support)&&Number(m.lastLow)<Number(p.support),volume=Number(m.vol)>=Number(m.vma5),money=flow?.m15?.status==='REAL'&&flow.m15.net>0&&!flow.distribution,rsi=Number(m.rsi6)>=Number(m.rsi12)&&Number(m.rsi)>=35,kdj=Number(m.kdjK)>Number(m.kdjD),ema=Number(m.ema9)>=Number(m.ema21),macd=Number(m.hist)>Number(m.prevHist),boll=Number(m.price)>=Number(m.bollDn),spreadOk=Number(spread)<=.35,sellingPressure=flow?.status==='REAL'&&flow.m15?.net<0&&flow.m30?.net<0&&(flow.h1?.net<0||flow.orders?.large<0),confirmedSupportBreak=closes15.length===2&&closes15.every(x=>x<p.zoneLow)&&sellingPressure;
   const confirmations=[higherLow,base,reclaim,fourHourHold,volume,money,rsi,kdj,ema,macd,boll,spreadOk].filter(Boolean).length,stabilized=!confirmedSupportBreak&&!fourHourFalling&&(higherLow||base||reclaim),state=confirmedSupportBreak?'DESTEK KIRILDI — AL YOK':newLow?'YENİ DİP — İZLE':fourHourFalling?'DÜŞÜŞ SÜRÜYOR — AL YOK':stabilized&&confirmations>=7?'TOPARLANMA TEYİDİ':stabilized?'YATAY / İZLE':'DESTEK GERİ KAZANIMI / İZLE';
-  p.recovery={history:history.context,asOf:history.asOf,drops,higherLow,base,reclaim,fourHourHold,fourHourFalling,newLow,sellingPressure,confirmedSupportBreak,confirmations,state,dipReference,advanceFromDipPct,multiDayReference,multiDayAdvancePct,nearTarget:p.interimTarget,mainTarget:p.mainTarget,maxRecoveryLevel:priorPeak,maxRecoveryPct,guaranteed:false};return p;
+  p.recovery={history:history.context,asOf:history.asOf,drops,drawdowns,changeReferenceAt,recentAdvancePct,higherLow,base,reclaim,fourHourHold,fourHourFalling,newLow,sellingPressure,confirmedSupportBreak,confirmations,state,dipReference,advanceFromDipPct,multiDayReference,multiDayAdvancePct,nearTarget:p.interimTarget,mainTarget:p.mainTarget,maxRecoveryLevel:priorPeak,maxRecoveryPct,guaranteed:false};return p;
 }
 
 async function analyzeCandidate(name, t24, bookMap = new Map()) {
@@ -964,7 +992,7 @@ function assignCandidateScores(metrics) {
     const liquid=(1-norm(Math.min(x.spread,.8),.05,.5))*8;
     const qvol=norm(Math.log10(Math.max(1,x.qv)),lmin,lmax)*2;
     const profitPts=(x.rpot?.profitScore||0)*3.0;
-    const supportPts=Math.min(30,(proximity+reversal)*1.5);
+    const supportPts=Math.min(10,(proximity+reversal)*.5);
     const reachPts=(x.rpot?.reach||0)*2.0;
     const momentumPts=Math.min(15,volume+trend+rsiPts);
     const liquidPts=Math.min(5,liquid+qvol);
@@ -972,7 +1000,7 @@ function assignCandidateScores(metrics) {
     const belowPenalty=d<-1.5?10:0;
     const overheat=x.m.rsi>72?8:0;
     const recovery=x.p?.recovery||{},risk=finderRiskFlags(x),recoveryBonus=recovery.state==='TOPARLANMA TEYİDİ'?Math.min(4,Number(recovery.confirmations||0)*.45):0,dipNearBonus=risk.severeDrop&&Math.abs(d)<=1.5&&(recovery.higherLow||recovery.base||recovery.reclaim)?8:0,recoveryPenalty=recovery.newLow?20:0,weakFlowPenalty=risk.weakRecovery?12:0,weakVolumePenalty=x.vRatio<.8?10:0,fastRisePenalty=risk.chased?18:0,theoreticalBonus=Math.min(2,Math.max(0,Number(recovery.maxRecoveryPct||0))*.03);
-    x.candidate=Math.max(0,Math.min(100,profitPts+reachPts+supportPts+momentumPts+liquidPts+recoveryBonus+dipNearBonus+theoreticalBonus-chasePenalty-belowPenalty-overheat-recoveryPenalty-weakFlowPenalty-weakVolumePenalty-fastRisePenalty));
+    x.candidate=Math.max(0,Math.min(100,finderEntryQuality(x).historicalScore+profitPts+reachPts+supportPts+momentumPts+liquidPts+recoveryBonus+dipNearBonus+theoreticalBonus-chasePenalty-belowPenalty-overheat-recoveryPenalty-weakFlowPenalty-weakVolumePenalty-fastRisePenalty-(finderEntryQuality(x).historicDistance>=12?30:0)));
     if(x.vRatio<.8&&!bounce)x.candidate=Math.min(x.candidate,74);
   }
 }
@@ -989,9 +1017,8 @@ function resistancePotential(x){
   const rsiV=Number(m.rsi||50);
   const signedDist=Number(p.dist??99), dist=Math.abs(signedDist);
 
-  let profitScore=0;
-  if(upside1<3)profitScore=0; else if(upside1<4)profitScore=4; else if(upside1<5)profitScore=5.5;
-  else if(upside1<7)profitScore=7.5; else if(upside1<10)profitScore=9; else if(upside1<15)profitScore=10; else profitScore=9.5;
+  const chosenQuality=finderEntryQuality(x),rankProfit=chosenQuality.profit;
+  const profitScore=rankProfit>=12?10:rankProfit>=8?7.5:rankProfit>=5-1e-9?5:0;
 
   let reach=0; reach+=(trend/4)*4; reach+=(Math.min(v,1.8)/1.8)*2.5;
   if(rsiV>=45&&rsiV<=67)reach+=1.5; else if(rsiV>=38&&rsiV<45)reach+=.8; else if(rsiV>72)reach-=1;
@@ -1004,7 +1031,7 @@ function resistancePotential(x){
   const executionConfidence=Math.max(0,Math.min(1,(reach*.55+support*.25+liquidity*.20)/10));
   const expectedEdge=Math.max(0,upside1*executionConfidence-Math.max(0,sp));
 
-  const eligible=!!p.hasResistance && !p.recovery?.confirmedSupportBreak && signedDist<=3.5 && rr>=1.30 && sp<=0.35;
+  const eligible=!chosenQuality.reason && !!p.hasResistance && !p.recovery?.confirmedSupportBreak && signedDist<=3.5 && chosenQuality.rr>=1.30 && sp<=0.35;
   return{score:Math.round(potScore*10)/10,upside1,upside2,rr,marketRR:Number(p.marketRR),conditionalRR:Number(p.conditionalRR),t1,t2,profitScore,reach,support,momentum,liquidity,expectedEdge:Math.round(expectedEdge*100)/100,dist,signedDist,eligible};
 }
 
