@@ -203,7 +203,7 @@ async function backgroundCycle(env, opts = {}) {
     tickerMap = market.tickerMap || new Map();
     bookMap = market.bookMap || new Map();
     validPairs = market.validPairs || new Set();
-    marketTop3 = market.metrics.filter(x=>{const state=candidateState(x);return !hardGateReason(x)&&(state==='BUY'||state==='CONDITIONAL'||(Number(x.rpot?.upside1)>=3&&Number(x.rpot?.expectedEdge)>=1));}).sort(compareCandidateState).slice(0,TRACK_COUNT);
+    marketTop3 = market.metrics.filter(x=>{return !hardGateReason(x);}).sort(compareCandidateState).slice(0,TRACK_COUNT);
   } else {
     const [tickers, books] = await Promise.all([
       all24hTickers().catch(() => []),
@@ -840,7 +840,7 @@ async function scanMarket() {
     metrics.push(...got.filter(Boolean));
   }
 
-  if (metrics.length < 3) throw new Error('Yeterli TRY coin verisi alınamadı.');
+  if (metrics.length === 0) throw new Error('Yeterli TRY coin verisi alınamadı.');
   assignCandidateScores(metrics);
   const tickerMap = new Map(tickers.map(x => [String(x.symbol || x.s || ''), x]));
   return { scanned: top.length, metrics, tickerMap, bookMap, validPairs };
@@ -853,10 +853,10 @@ function validTryPairs(tickers,books){
 
 function hardGateReason(x){
   const p=x?.p||{},f=x?.flow||{},marketEntry=Number(p.marketEntry||x?.m?.price),conditionalEntry=Number(p.conditionalEntry),stop=Number(p.stop),marketRR=Number(p.marketRR),conditionalRR=Number(p.conditionalRR),spread=Number(x?.spread),out=f.status==='REAL'&&f.m15?.net<0&&f.m30?.net<0&&f.h1?.net<0&&Math.abs(f.m15.net)*2>Math.abs(f.m30.net);
-  if(!p.hasResistance)return 'HEDEF_YOK';if(!(spread>=0&&spread<=.35))return 'SPREAD_LIKIDITE';if(!(stop>0&&stop<marketEntry))return 'STOP_YOK';if(p.recovery?.confirmedSupportBreak)return 'DESTEK_KIRILDI';if(out||f.distribution)return 'PARA_CIKISI';if(!(marketRR>=1.30)&&!(conditionalEntry<marketEntry&&conditionalRR>=1.30))return 'RR';return '';
+  if(!p.hasResistance)return 'HEDEF_YOK';if(!(spread>=0&&spread<=.35))return 'SPREAD_LIKIDITE';if(!(stop>0&&stop<marketEntry))return 'STOP_YOK';if(p.recovery?.confirmedSupportBreak)return 'DESTEK_KIRILDI';if(out||f.distribution)return 'PARA_CIKISI';if(!(marketRR>=1.30)&&!(conditionalEntry>stop&&conditionalEntry<marketEntry&&Number(p.mainTarget||p.t2||p.t1)>conditionalEntry&&conditionalRR>=1.30))return 'RR';return '';
 }
 function finderRiskFlags(x){const p=x?.p||{},m=x?.m||{},h=x?.h||{},rec=p.recovery||{},f=x?.flow||{},drops=rec.drops||{},severeDrop=Number(drops.d3)<=-8||Number(drops.d5)<=-12||Number(drops.d7)<=-18,weakRecovery=severeDrop&&f.status==='REAL'&&Number(f.h1?.net)<0&&rec.state!=='TOPARLANMA TEYİDİ',fast15=Number(m.lastOpen)>0&&((Number(m.price)/Number(m.lastOpen)-1)*100)>=2.5,fast1h=Number(h.lastOpen)>0&&((Number(m.price)/Number(h.lastOpen)-1)*100)>=4,overheat=Number(m.rsi6)>=82||Number(m.rsi12)>=72||Number(m.rsi)>75,momentumHot=Number(m.rsi6)>=70||Number(m.rsi12)>=65||Number(m.rsi)>=68,entryGap=Number(p.marketEntry)>0&&Number(p.conditionalEntry)>0?(Number(p.marketEntry)/Number(p.conditionalEntry)-1)*100:0,anchorAdvance=Number(rec.advanceFromDipPct),multiDayAdvance=Number(rec.multiDayAdvancePct),advancedLate=anchorAdvance>=12||(anchorAdvance>=8&&(fast15||fast1h||momentumHot||entryGap>2.5))||(multiDayAdvance>=18&&(fast15||fast1h||momentumHot||entryGap>2.5)),chased=overheat||fast15||entryGap>2.5||advancedLate;return{severeDrop,weakRecovery,fast15,fast1h,overheat,momentumHot,entryGap,anchorAdvance,multiDayAdvance,advancedLate,chased,pullback:weakRecovery||chased};}
-function candidateState(x){if(hardGateReason(x))return 'REJECT';const p=x.p||{},m=x.m||{},rec=p.recovery||{},hold=!rec.confirmedSupportBreak&&!rec.fourHourFalling&&(rec.higherLow||rec.base||rec.reclaim||Number(p.dist)<0),momentum=[m.hist>m.prevHist,m.kdjK>m.kdjD,m.price>m.lastOpen,m.rsi6>=m.rsi12].filter(Boolean).length,flow=x.flow||{},flowOk=flow.status!=='REAL'||flow.m15?.net>0||!flow.distribution;if(finderRiskFlags(x).pullback)return 'PULLBACK';if(p.bounce&&hold&&flowOk&&Number(p.marketRR)>=1.30&&Number(x.buy)>=7)return 'BUY';if(p.near&&!p.bounce&&hold&&flowOk)return 'LIMIT_WAIT';if(Number(p.conditionalEntry)>Number(p.stop)&&Number(p.conditionalEntry)<Number(p.marketEntry)&&Number(p.conditionalRR)>=1.30&&hold&&flowOk&&momentum>=2)return 'CONDITIONAL';if((p.near||Number(p.dist)<=2)&&hold&&flowOk&&momentum>=2)return 'EARLY';return 'WATCH';}
+function candidateState(x){if(hardGateReason(x))return 'REJECT';const p=x.p||{},m=x.m||{},rec=p.recovery||{},hold=!rec.confirmedSupportBreak&&!rec.fourHourFalling&&(rec.higherLow||rec.base||rec.reclaim||Number(p.dist)<0),momentum=[m.hist>m.prevHist,m.kdjK>m.kdjD,m.price>m.lastOpen,m.rsi6>=m.rsi12].filter(Boolean).length,flow=x.flow||{},flowOk=flow.status!=='REAL'||flow.m15?.net>0||!flow.distribution;if(finderRiskFlags(x).pullback)return 'PULLBACK';if(p.bounce&&hold&&flowOk&&Number(p.marketRR)>=1.30&&Number(x.buy)>=7)return 'BUY';if(p.near&&Number(p.conditionalEntry)>=Number(p.zoneLow)&&Number(p.conditionalEntry)<=Number(p.zoneHigh)&&!p.bounce&&hold&&flowOk)return 'LIMIT_WAIT';if(Number(p.conditionalEntry)>Number(p.stop)&&Number(p.conditionalEntry)<Number(p.marketEntry)&&Number(p.conditionalRR)>=1.30&&hold&&flowOk&&momentum>=2)return 'CONDITIONAL';if((p.near||Number(p.dist)<=2)&&hold&&flowOk&&momentum>=2)return 'EARLY';return 'WATCH';}
 function compareCandidateState(a,b){const rank={BUY:6,CONDITIONAL:5,LIMIT_WAIT:4,EARLY:3,PULLBACK:2,WATCH:1};return (rank[candidateState(b)]-rank[candidateState(a)])||compareProfitFirst(a,b);}
 
 function klineNetFlow(rows,count){const a=(rows||[]).slice(-count),quote=a.reduce((s,x)=>s+(+x[7]||0),0),buy=a.reduce((s,x)=>s+(+x[10]||0),0);return{status:quote>0?'REAL':'VERİ YOK',net:quote>0?buy-(quote-buy):NaN,quote};}
@@ -866,17 +866,48 @@ async function fetchOrderFlow(name){try{const clean=cleanBase(name),j=await fetc
 function buildFlowContext(k15,orders,m){const m15=klineNetFlow(k15,1),m30=klineNetFlow(k15,2),h1=klineNetFlow(k15,4),distribution=Number(m?.price)>Number(m?.closedPrice)&&m15.status==='REAL'&&m15.net<0;return{status:[m15,m30,h1].every(x=>x.status==='REAL')?'REAL':'VERİ YOK',m15,m30,h1,orders,distribution};}
 function recoveryProfit(price,target){return price>0&&target>price?(target/price-1)*100:NaN;}
 function uniqueLevels(values){return [...new Set(values.filter(Number.isFinite).filter(x=>x>0).map(x=>+x.toPrecision(12)))].sort((a,b)=>a-b);}
+// Only completed candles available at this 15-minute close may define history/targets.
+function recoveryHistory(k15,k1h,k4h,k1d,price){
+ const asOf=Number(k15?.at(-1)?.[6]);
+ const closed=rows=>(rows||[]).filter(r=>Number.isFinite(Number(r[6]))&&Number(r[6])<=asOf);
+ const intraday=closed(k15),hourly=closed(k1h),fourHourly=closed(k4h),daily=closed(k1d);
+ const context={};
+ for(const [name,days] of [['day',1],['week',7],['month',30],['year',365]]){
+  const rows=days===1?intraday.filter(r=>Number(r[0])>asOf-86400000):daily.slice(-days);
+  const lows=rows.map(r=>Number(r[3])).filter(x=>x>0),highs=rows.map(r=>Number(r[2])).filter(x=>x>0);
+  const low=lows.length?Math.min(...lows):NaN,high=highs.length?Math.max(...highs):NaN;
+  context[name]={low,high,bars:rows.length,complete:days===1?rows.length>=96:rows.length>=days,distancePct:low>0?(price/low-1)*100:NaN};
+ }
+ // Keep the current reversal's confirmed low across midnight and higher lows.
+ // Older 3/5/7-day floors remain separate context, not a forced intraday entry anchor.
+ const floors=[3,5,7].map(days=>Math.min(...daily.slice(-days).map(r=>Number(r[3])).filter(x=>x>0))).filter(Number.isFinite);
+ const multiDayReference=floors.length?Math.max(...floors):NaN;
+ const recentLows=intraday.map(r=>Number(r[3])).filter(x=>x>0);
+ const pivots=swingLevels(intraday,'low',2,220);
+ let dipReference=NaN,previousPivot=NaN;
+ for(const low of pivots){if(!Number.isFinite(dipReference)||low<previousPivot)dipReference=low;previousPivot=low;}
+ if(!Number.isFinite(dipReference))dipReference=recentLows.length?Math.min(...recentLows):NaN;
+ const micro=swingLevels(intraday,'high',2,120);
+ // Confirmed higher-timeframe swings, not an arbitrary second micro resistance.
+ const strong=uniqueLevels([...swingLevels(hourly,'high',2,160),...swingLevels(fourHourly,'high',2,120),...swingLevels(daily,'high',2,365)]);
+ const resistances=uniqueLevels([...micro,...strong]).filter(x=>x>price*1.002);
+ const interimTarget=resistances[0]??NaN;
+ const mainTarget=strong.find(x=>x>interimTarget*1.002)??interimTarget;
+ const nextTarget=strong.find(x=>x>mainTarget*1.006)??NaN;
+ return{asOf,intraday,hourly,fourHourly,daily,context,dipReference,multiDayReference,resistances,interimTarget,mainTarget,nextTarget};
+}
 function enrichRecoveryPlan(p,k15,k1h,k4h,k1d,m,h,flow,spread){
-  const price=Number(m.price),daily=(k1d||[]).slice(-8),dailyHighs=daily.map(x=>+x[2]);
-  const res=uniqueLevels([p.t1,p.t2,...swingLevels(k15,'high',2,120),...swingLevels(k1h,'high',2,160),...swingLevels(k4h||[],'high',2,120),...swingLevels(k1d||[],'high',1,120),...dailyHighs]).filter(x=>x>price*1.002);
-  const interimTarget=res[0]??p.t1,mainTarget=res.find(x=>x>interimTarget*1.002)??interimTarget,nextTarget=res.find(x=>x>mainTarget*1.006)??NaN;
-  p.resistances=res;p.interimTarget=interimTarget;p.mainTarget=mainTarget;p.t1=interimTarget;p.t2=mainTarget;p.t3=nextTarget;p.hasResistance=Number.isFinite(interimTarget);p.marketEntry=price;p.conditionalEntry=price>p.zoneHigh?p.zoneHigh:price;p.earlyEntry=p.conditionalEntry;p.marketRR=p.hasResistance&&price>p.stop&&mainTarget>price?(mainTarget-price)/(price-p.stop):NaN;p.conditionalRR=p.hasResistance&&p.conditionalEntry>p.stop&&mainTarget>p.conditionalEntry?(mainTarget-p.conditionalEntry)/(p.conditionalEntry-p.stop):NaN;p.rr=p.conditionalRR;
+ const price=Number(m.price),history=recoveryHistory(k15,k1h,k4h,k1d,price);
+ k15=history.intraday;k1h=history.hourly;k4h=history.fourHourly;k1d=history.daily;
+ const daily=k1d.slice(-8),dailyHighs=daily.map(x=>+x[2]),res=history.resistances;
+ const {interimTarget,mainTarget,nextTarget}=history;
+ p.resistances=res;p.interimTarget=interimTarget;p.mainTarget=mainTarget;p.t1=interimTarget;p.t2=mainTarget;p.t3=nextTarget;p.hasResistance=Number.isFinite(interimTarget);p.marketEntry=price;p.conditionalEntry=price>p.zoneHigh&&p.supportSource==='HORIZONTAL'?p.zoneHigh:price;p.earlyEntry=p.conditionalEntry;p.marketRR=p.hasResistance&&price>p.stop&&mainTarget>price?(mainTarget-price)/(price-p.stop):NaN;p.conditionalRR=p.hasResistance&&p.conditionalEntry>p.stop&&mainTarget>p.conditionalEntry?(mainTarget-p.conditionalEntry)/(p.conditionalEntry-p.stop):NaN;p.rr=p.conditionalRR;
   const drops={};for(const days of [3,5,7]){const w=daily.slice(-days),peak=Math.max(...w.map(x=>+x[2]).filter(Number.isFinite));drops['d'+days]=peak>0?(price/peak-1)*100:NaN;}
-  const priorPeak=Math.max(...dailyHighs.filter(Number.isFinite)),maxRecoveryPct=recoveryProfit(price,priorPeak),lows15=swingLevels(k15,'low',2,80),higherLow=lows15.length>=2&&lows15.at(-1)>lows15.at(-2)*1.001,latestOpen=Number((k15||[]).at(-1)?.[0]),sessionKey=Number.isFinite(latestOpen)?new Date(latestOpen+3*60*60e3).toISOString().slice(0,10):'',sessionLows=(k15||[]).filter(x=>new Date(Number(x[0])+3*60*60e3).toISOString().slice(0,10)===sessionKey).map(x=>+x[3]).filter(Number.isFinite),dailyFloors=[3,5,7].map(days=>Math.min(...daily.slice(-days).map(x=>+x[3]).filter(Number.isFinite))).filter(Number.isFinite),dipReference=sessionLows.length?Math.min(...sessionLows):Math.max(...dailyFloors),advanceFromDipPct=dipReference>0?(price/dipReference-1)*100:NaN,multiDayReference=dailyFloors.length?Math.max(...dailyFloors):NaN,multiDayAdvancePct=multiDayReference>0?(price/multiDayReference-1)*100:NaN;
+  const priorPeak=Math.max(...dailyHighs.filter(Number.isFinite)),maxRecoveryPct=recoveryProfit(price,priorPeak),lows15=swingLevels(k15,'low',2,80),higherLow=lows15.length>=2&&lows15.at(-1)>lows15.at(-2)*1.001,dipReference=history.dipReference,advanceFromDipPct=dipReference>0?(price/dipReference-1)*100:NaN,multiDayReference=history.multiDayReference,multiDayAdvancePct=multiDayReference>0?(price/multiDayReference-1)*100:NaN;
   const closes15=(k15||[]).slice(-2).map(x=>+x[4]),closes4h=(k4h||[]).slice(-3).map(x=>+x[4]),lows4h=(k4h||[]).slice(-3).map(x=>+x[3]),fourHourHold=closes4h.length>=2&&closes4h.at(-1)>=closes4h.at(-2),fourHourFalling=closes4h.length===3&&closes4h[2]<closes4h[1]&&closes4h[1]<closes4h[0]&&lows4h[2]<=lows4h[1];
   const lastDailyLow=+daily.at(-1)?.[3],previousDailyLows=daily.slice(0,-1).map(x=>+x[3]).filter(Number.isFinite),newLow=previousDailyLows.length&&lastDailyLow<=Math.min(...previousDailyLows),recent15=(k15||[]).slice(-4),range15=recent15.length?Math.max(...recent15.map(x=>+x[2]))-Math.min(...recent15.map(x=>+x[3])):Infinity,base=range15<=Math.max(Number(p.atr)||0,price*.012),reclaim=Number(m.price)>=Number(p.support)&&Number(m.lastLow)<Number(p.support),volume=Number(m.vol)>=Number(m.vma5),money=flow?.m15?.status==='REAL'&&flow.m15.net>0&&!flow.distribution,rsi=Number(m.rsi6)>=Number(m.rsi12)&&Number(m.rsi)>=35,kdj=Number(m.kdjK)>Number(m.kdjD),ema=Number(m.ema9)>=Number(m.ema21),macd=Number(m.hist)>Number(m.prevHist),boll=Number(m.price)>=Number(m.bollDn),spreadOk=Number(spread)<=.35,sellingPressure=flow?.status==='REAL'&&flow.m15?.net<0&&flow.m30?.net<0&&(flow.h1?.net<0||flow.orders?.large<0),confirmedSupportBreak=closes15.length===2&&closes15.every(x=>x<p.zoneLow)&&sellingPressure;
   const confirmations=[higherLow,base,reclaim,fourHourHold,volume,money,rsi,kdj,ema,macd,boll,spreadOk].filter(Boolean).length,stabilized=!confirmedSupportBreak&&!fourHourFalling&&(higherLow||base||reclaim),state=confirmedSupportBreak?'DESTEK KIRILDI — AL YOK':newLow?'YENİ DİP — İZLE':fourHourFalling?'DÜŞÜŞ SÜRÜYOR — AL YOK':stabilized&&confirmations>=7?'TOPARLANMA TEYİDİ':stabilized?'YATAY / İZLE':'DESTEK GERİ KAZANIMI / İZLE';
-  p.recovery={drops,higherLow,base,reclaim,fourHourHold,fourHourFalling,newLow,sellingPressure,confirmedSupportBreak,confirmations,state,dipReference,advanceFromDipPct,multiDayReference,multiDayAdvancePct,nearTarget:p.interimTarget,mainTarget:p.mainTarget,maxRecoveryLevel:priorPeak,maxRecoveryPct,guaranteed:false};return p;
+  p.recovery={history:history.context,asOf:history.asOf,drops,higherLow,base,reclaim,fourHourHold,fourHourFalling,newLow,sellingPressure,confirmedSupportBreak,confirmations,state,dipReference,advanceFromDipPct,multiDayReference,multiDayAdvancePct,nearTarget:p.interimTarget,mainTarget:p.mainTarget,maxRecoveryLevel:priorPeak,maxRecoveryPct,guaranteed:false};return p;
 }
 
 async function analyzeCandidate(name, t24, bookMap = new Map()) {
@@ -983,7 +1014,8 @@ function tradePlan(k15,k1h,m,h){
   const lows15=swingLevels(k15,'low',2,100), lows1=swingLevels(k1h,'low',2,100);
   const highs15=swingLevels(k15,'high',2,100), highs1=swingLevels(k1h,'high',2,100);
   const s15=clusteredLevel(lows15,price,'below'), s1=clusteredLevel(lows1,price,'below',.7);
-  const supports=[s15,s1,m.bollDn,m.ema21,h.ema21].filter(Number.isFinite).filter(x=>x<=price*1.015);
+  const horizontalSupports=[...lows15,...lows1].filter(Number.isFinite).filter(x=>x<=price);
+ const supports=horizontalSupports.length?horizontalSupports:[m.bollDn,m.ema21,h.ema21].filter(Number.isFinite).filter(x=>x<=price*1.015);
   let support=supports.length?supports.sort((a,b)=>Math.abs(price-a)-Math.abs(price-b))[0]:price-A;
   const pad=Math.max(A*.22,support*.0015);
   const zoneLow=Math.max(0,support-pad), zoneHigh=support+pad;
@@ -1008,7 +1040,7 @@ function tradePlan(k15,k1h,m,h){
   const entry=near?price:(zoneLow+zoneHigh)/2;
   const risk=Math.max(entry-stop,entry*.001), rr=Number.isFinite(t1)?(t1-entry)/risk:NaN;
   const status=bounce?'TEYİTLİ GİRİŞ':(near?'BEKLE — DESTEK TEYİDİ BEKLENİYOR':dist>3.5?'GEÇ KALINDI':dist>0?'BEKLE — DESTEĞE GERİ ÇEKİLME':'ALMA — DESTEK KAPANIŞLA GEÇERSİZ');
-  return{support,zoneLow,zoneHigh,dist,near,bounce,volOk,rsiOk,emaOk,macdOk,hourlyOk,stop,t1,t2,crossedResistance,entry,rr,hasResistance,status,atr:A};
+  return{support,supportSource:horizontalSupports.length?'HORIZONTAL':'DYNAMIC',zoneLow,zoneHigh,dist,near,bounce,volOk,rsiOk,emaOk,macdOk,hourlyOk,stop,t1,t2,crossedResistance,entry,rr,hasResistance,status,atr:A};
 }
 
 function score(m,h,p){
@@ -1050,14 +1082,14 @@ function closedKlines(rows,interval){
 async function klines(name,interval){
   const clean=cleanBase(name);
   const urls=[
-    `https://api.binance.me/api/v1/klines?symbol=${clean}TRY&interval=${interval}&limit=220`,
-    `https://cloudme-tr.2meta.app/api/v1/klines?symbol=${clean}_TRY&interval=${interval}&limit=220`,
-    `https://cloudme-tr.2meta.app/api/v1/klines?symbol=${clean}TRY&interval=${interval}&limit=220`
+    `https://api.binance.me/api/v1/klines?symbol=${clean}TRY&interval=${interval}&limit=${interval==='1d'?366:220}`,
+    `https://cloudme-tr.2meta.app/api/v1/klines?symbol=${clean}_TRY&interval=${interval}&limit=${interval==='1d'?366:220}`,
+    `https://cloudme-tr.2meta.app/api/v1/klines?symbol=${clean}TRY&interval=${interval}&limit=${interval==='1d'?366:220}`
   ];
   const j=await fetchJsonAny(urls);
   const raw=Array.isArray(j)?j:j?.data;
   const d=Array.isArray(raw)?closedKlines(raw,interval):[];
-  if(d.length<=50)throw new Error(`${clean}/TRY ${interval} kapanmış mum verisi yetersiz.`);
+  if(d.length<(interval==='1d'?8:51))throw new Error(`${clean}/TRY ${interval} kapanmış mum verisi yetersiz.`);
   return d;
 }
 
