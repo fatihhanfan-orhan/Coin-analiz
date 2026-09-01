@@ -3,6 +3,10 @@
   "name": "coin-analiz",
   "main": "worker.js",
   "compatibility_date": "2026-08-12",
+  "durable_objects": {
+    "bindings": [{ "name": "OPPORTUNITY_ALARMS", "class_name": "OpportunityAlarm" }]
+  },
+  "migrations": [{ "tag": "critical-alarm-v1", "new_sqlite_classes": ["OpportunityAlarm"] }],
   "triggers": {
     "crons": ["* * * * *"]
   },
@@ -13,6 +17,8 @@
     }
   ],
   "vars": {
+    "CRITICAL_ALARM_ENABLED": "false",
+    "CRITICAL_ALARM_API": "https://coin-analiz.fatihhanfan.workers.dev",
     "ONESIGNAL_APP_ID": "ff896540-819b-40b0-a829-853c95d35bda",
     "APP_URL": "https://fatihhanfan-orhan.github.io/Coin-analiz/"
   }

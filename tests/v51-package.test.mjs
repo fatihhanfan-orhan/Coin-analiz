@@ -15,7 +15,7 @@ function environment(){
   c.window=c;return vm.createContext(c);
 }
 function app(source=html){const c=environment();for(const match of source.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/g)){if(!/src=|application\//.test(match[1]))vm.runInContext(match[2].replace(/acknowledgeOpportunity\(\);\s*run\(\);\s*$/,'').replace(/\brun\(\);\s*$/,''),c);}return c;}
-function edge(){const c=environment();vm.runInContext(worker.replace(/^import .*critical-alarm.mjs';\r?\n/m,'').replace('export class OpportunityAlarm','class OpportunityAlarm').replace('export default {','const handler = {'),c);return c;}
+function edge(){const c=environment();vm.runInContext(fs.readFileSync(new URL('critical-alarm.mjs',root),'utf8').replace(/export /g,'')+'\n'+worker.replace(/^import .*critical-alarm.mjs';\r?\n/m,'').replace('export class OpportunityAlarm','class OpportunityAlarm').replace('export default {','const handler = {'),c);return c;}
 function run(c,code){return vm.runInContext(code,c);}
 function fixture(){return {name:'HEMI',buy:8,s:{buy:8},spread:.1,vRatio:1.2,m:{price:100,lastOpen:99,closedPrice:100,rsi:50,rsi6:52,rsi12:50,hist:2,prevHist:1,kdjK:55,kdjD:50},h:{lastOpen:99},flow:{status:'REAL',m15:{net:10},m30:{net:20},h1:{net:40},distribution:false},p:{marketEntry:100,conditionalEntry:99,stop:98,marketRR:1.3,conditionalRR:2,hasResistance:true,mainTarget:105,supportSource:'HORIZONTAL',zoneLow:98.8,zoneHigh:99,dist:1,near:false,bounce:false,recovery:{history:{week:{complete:true,low:98},month:{complete:true,low:98},quarter:{complete:true,low:98},year:{complete:false}},base:true,state:'DÖNÜŞ ADAYI',advanceFromDipPct:2,multiDayAdvancePct:3}}};}
 test('normal push: 4.5% market / 5.56% conditional cannot produce market-entry notification',async()=>{
@@ -33,6 +33,40 @@ test('normal push: 4.5% market / 5.56% conditional cannot produce market-entry n
  w.previous=structuredClone(x);x.p.mainTarget=106;x.p.marketRR=3;x.p.conditionalRR=7;
  assert.equal(a.entryState(x).key,'CONFIRMED');
  alerts=await run(w,'buildPositionAlerts({},[previous],[x])');assert.deepEqual(Array.from(alerts,a=>a.type),['BUY_READY']);
+});
+
+test('Edge open + Android background: critical event is Worker-only and KV-deduplicated',async()=>{
+ const a=app(),w=edge(),memory=new Map();
+ assert.doesNotMatch(String(a.maybeFastLocalPositionAlert),/showSystemNotification/);
+ assert.doesNotMatch(String(a.maybePositionAlert),/showSystemNotification/);
+ assert.doesNotMatch(String(a.liveNotify),/st==='CONFIRMED'|st==='CONDITIONAL'|st==='TARGET_NEAR'|st==='TARGET_REACHED'/);
+ const env={COIN_KV:{get:async key=>memory.get(key)||null,put:async(key,value)=>memory.set(key,value)}};
+ w.env=env;
+ const previous=fixture();previous.p.mainTarget=101;previous.p.marketRR=1;previous.p.conditionalRR=1;previous.eventAt=1724889600000;
+ const conditional=fixture();conditional.eventAt=1724889600000;
+ w.previous=previous;w.current=conditional;
+ let alerts=await run(w,'buildPositionAlerts(env,[previous],[current])');
+ assert.deepEqual(Array.from(alerts,a=>a.type),['CONDITIONAL_READY']);
+ w.alert=alerts[0];await run(w,'markAlertSent(env,alert)');
+ assert.equal((await run(w,'buildPositionAlerts(env,[previous],[current])')).length,0,'same event is not sent once by Edge and again for Android');
+ const nextCandle=structuredClone(conditional);nextCandle.eventAt=conditional.eventAt+900000;w.nextCandle=nextCandle;
+ alerts=await run(w,'buildPositionAlerts(env,[previous],[nextCandle])');
+ assert.deepEqual(Array.from(alerts,a=>a.type),['CONDITIONAL_READY'],'same decision may notify again when it genuinely forms on a new candle');
+ assert.notEqual(alerts[0].eventId,w.alert.eventId);
+ const buy=structuredClone(conditional);buy.p.bounce=true;buy.p.marketRR=1.5;buy.p.mainTarget=106;buy.eventAt=conditional.eventAt;w.buy=buy;
+ alerts=await run(w,'buildPositionAlerts(env,[current],[buy])');
+ assert.deepEqual(Array.from(alerts,a=>a.type),['BUY_READY'],'CONDITIONAL → BUY is a distinct event');
+ assert.notEqual(alerts[0].eventId,w.alert.eventId);
+ const risk=run(w,"buildPositionRiskAlert({name:'HEMI',positionId:123,price:97,stop:98,target:105,entry:100,highWater:103,pnl:-3,pullback:5,remaining:8})");
+ w.risk=risk;assert.equal(await run(w,'alertAllowed(env,risk)'),true);await run(w,'markAlertSent(env,risk)');assert.equal(await run(w,'alertAllowed(env,risk)'),false);
+});
+
+test('Finder keeps zero real entries honest while exposing hard-safe preparation candidates',()=>{
+ const a=app(),x=fixture();x.p.mainTarget=103.5;x.p.marketRR=1.5;x.p.conditionalRR=2;x.p.bounce=false;
+ a.x=x;assert.equal(a.finderEntryQuality(x).reason,'KÂR ALANI %5 / R/R ŞARTI SAĞLANMADI');
+ assert.equal(a.preparationCandidate(x).eligible,true);
+ x.spread=.5;assert.equal(a.preparationCandidate(x).eligible,false,'unsafe spread never enters preparation list');
+ assert.match(html,/HAZIRLIK \/ TAKİP LİSTESİ — ŞİMDİ AL SİNYALİ DEĞİL/);
 });
 
 test('normal push: rejected/pullback/watch/wait states never leak auxiliary buy alerts',async()=>{
@@ -56,7 +90,7 @@ test('source syntax and V5.1 active labels',()=>{
   assert.match(html,/V5\.1 DENETİMLİ KARAR MOTORU/);assert.match(worker,/5\.1-QUOTE/);
 });
 
-test('critical alerts use existing entry states, fresh data and entry-specific R/R',{skip:'Unreleased critical alarm is excluded from this production package'},()=>{
+test('critical alerts use existing entry states, fresh data and entry-specific R/R',()=>{
  const w=edge(),now=Date.now();
  const fresh=()=>{const x=fixture();x.qv=1000000;x.p.supportSource='HORIZONTAL';x.freshness={quoteAt:now,closes:[now-1000,now-1000,now-1000,now-1000]};return x;};
  let x=fresh();w.x=x;assert.equal(run(w,'criticalOpportunity(x)').kind,'CONDITIONAL');assert.equal(run(w,'criticalOpportunity(x)').entry,99);

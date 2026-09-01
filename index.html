@@ -15,7 +15,7 @@
 <style>
 :root{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#eef3fb;background:#08111f}
 *{box-sizing:border-box}body{margin:0;background:linear-gradient(180deg,#07101b,#0b1422);min-height:100vh;padding:12px;padding-bottom:28px}.wrap{max-width:1400px;margin:auto}.card{background:#101a29;border:1px solid #24344b;border-radius:18px;padding:14px;box-shadow:0 8px 28px #0004}.header{margin-bottom:10px}.title{display:flex;align-items:center;gap:10px}.title img{width:42px;height:42px;border-radius:10px}.title h1{font-size:22px;margin:0}.accent{color:#31d158}.sub{font-size:12px;color:#aab6c7;margin-top:4px}.controls{display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;margin-bottom:8px}.controls button{grid-column:1/-1}input,button{width:100%;font-size:16px;padding:12px;border-radius:12px;border:1px solid #314258;background:#0c1625;color:#fff}button{background:#18a63d;border:0;font-weight:900}.livebar{display:flex;justify-content:space-between;gap:8px;align-items:center;font-size:11px;color:#aab6c7;margin:7px 2px 11px}.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#31d158;margin-right:5px}.compare-wrap{overflow-x:auto;padding-bottom:6px;scroll-snap-type:x proximity}.coins{display:grid;grid-template-columns:repeat(3,minmax(275px,1fr));gap:9px;min-width:845px}.coin{scroll-snap-align:start;background:#101a29;border:1px solid #2b3e58;border-radius:18px;padding:12px}.coin.goodborder{border-color:#20c55a}.coin.midborder{border-color:#ffb020}.coin.badborder{border-color:#ff4d4f}.coin-head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}.coin-title{font-size:21px;font-weight:950}.price{font-size:26px;font-weight:950;margin-top:4px}.chg{font-weight:800;font-size:14px}.good{color:#31d158}.mid{color:#ffb020}.bad{color:#ff4d4f}.badge{display:inline-block;border-radius:999px;padding:5px 10px;font-size:12px;font-weight:900;margin-top:6px}.badge.good{background:#0c4c29}.badge.mid{background:#5a3a00}.badge.bad{background:#57191c}.scores{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin:10px 0}.scorebox{border:1px solid #26384f;border-radius:13px;padding:9px}.scorelabel{font-size:10px;color:#9aa7ba}.score{font-size:29px;font-weight:950}.section{margin-top:10px;border-top:1px solid #27384e;padding-top:9px}.section h3{font-size:13px;margin:0 0 7px;color:#dfe7f2}.metrics{display:grid;grid-template-columns:1fr 1fr;gap:5px}.metric{padding:7px 8px;border-radius:10px;background:#0b1523}.metric b{display:block;font-size:9px;color:#8fa0b5}.metric span{font-size:12px;font-weight:800}.summary{margin-top:10px}.rank{display:grid;gap:7px;margin-top:8px}.rankrow{display:grid;grid-template-columns:32px 1fr auto;gap:8px;align-items:center;padding:9px;border-radius:12px;background:#0b1523}.ranknum{font-size:18px;font-weight:950}.rankname,.rankscore{font-weight:900}.note{font-size:11px;color:#8fa0b5;margin-top:9px;line-height:1.35}.err{font-size:12px;color:#ff8a8a;white-space:pre-wrap}.install{display:none;margin-top:10px;background:#2563eb}.hint{font-size:11px;color:#aab6c7;margin-top:6px}.decision{margin-top:10px;border-radius:14px;padding:11px 12px;text-align:center;font-size:24px;font-weight:950;letter-spacing:.3px}.decision.good{background:#0b512c;color:#52ed83;border:1px solid #1bc75a}.decision.mid{background:#5c3b00;color:#ffc34d;border:1px solid #ffad16}.decision.bad{background:#5a171b;color:#ff6b70;border:1px solid #ff4d4f}.whybtn{margin-top:7px;background:#16243a;border:1px solid #334966;color:#dbe7f5;font-size:13px;padding:9px}.why{display:none;margin-top:7px;background:#0a1422;border:1px solid #263a55;border-radius:12px;padding:9px 10px;font-size:12px;line-height:1.5;color:#cbd6e5}.why.show{display:block}.whyrow{display:flex;gap:7px;margin:4px 0}.whyicon{width:18px;flex:0 0 18px;text-align:center}.decisionSub{font-size:10px;font-weight:700;opacity:.8;margin-top:3px}.tradeplan{margin-top:10px;border:1px solid #2d4666;border-radius:14px;padding:10px;background:#0a1422}.tradeplan h3{margin:0 0 8px;font-size:13px;color:#e7eef8}.planmain{font-size:14px;font-weight:900;line-height:1.5}.planrow{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:7px}.planbox{background:#0d1a2b;border:1px solid #263b57;border-radius:10px;padding:8px}.planbox b{display:block;font-size:9px;color:#91a2b8}.planbox span{font-size:12px;font-weight:900}.near{color:#52ed83}.far{color:#ffc34d}.danger{color:#ff6b70}.tiny{font-size:10px;color:#93a3b7;margin-top:7px;line-height:1.35}
-.monitor{margin:9px 0 11px;display:grid;grid-template-columns:1fr 1fr;gap:8px}.monbox{background:#0b1523;border:1px solid #273a53;border-radius:13px;padding:10px}.monlabel{font-size:10px;color:#8fa0b5}.monvalue{font-size:15px;font-weight:900;margin-top:3px}.notifybtn{margin-top:8px;background:#7c3aed}.notifybtn.on{background:#0f8f3b}.autostatus{font-size:11px;color:#aab6c7;line-height:1.45;margin-top:7px}.closedtag{display:inline-block;font-size:9px;border:1px solid #35506f;border-radius:999px;padding:2px 6px;color:#9eb3cb;margin-left:5px}.pulse{animation:pulse 1.2s ease-in-out 2}@keyframes pulse{50%{box-shadow:0 0 0 4px #31d15833}}.finder{margin:0 0 10px;background:linear-gradient(135deg,#15233a,#10291f);border:1px solid #2f4d65}.finderBtn{background:#ff8a00;color:#111;font-weight:950;font-size:17px}.scanstatus{font-size:11px;color:#b9c7da;margin-top:8px;line-height:1.45}.candidateGrid{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:9px}.cand{background:#0a1422;border:1px solid #2a3e59;border-radius:12px;padding:9px}.cand b{font-size:14px}.cand .cp{font-size:20px;font-weight:950;margin-top:2px}.cand small{display:block;color:#93a4b9;margin-top:2px}.method{font-size:10px;color:#8fa0b5;margin-top:7px;line-height:1.35}@media(max-width:720px){.candidateGrid{grid-template-columns:1fr 1fr 1fr}.cand{padding:7px}.cand .cp{font-size:17px}}
+.monitor{margin:9px 0 11px;display:grid;grid-template-columns:1fr 1fr;gap:8px}.monbox{background:#0b1523;border:1px solid #273a53;border-radius:13px;padding:10px}.monlabel{font-size:10px;color:#8fa0b5}.monvalue{font-size:15px;font-weight:900;margin-top:3px}.notifybtn{margin-top:8px;background:#7c3aed}.notifybtn.on{background:#0f8f3b}.autostatus{font-size:11px;color:#aab6c7;line-height:1.45;margin-top:7px}.closedtag{display:inline-block;font-size:9px;border:1px solid #35506f;border-radius:999px;padding:2px 6px;color:#9eb3cb;margin-left:5px}.pulse{animation:pulse 1.2s ease-in-out 2}@keyframes pulse{50%{box-shadow:0 0 0 4px #31d15833}}.finder{margin:0 0 10px;background:linear-gradient(135deg,#15233a,#10291f);border:1px solid #2f4d65}.finderBtn{background:#ff8a00;color:#111;font-weight:950;font-size:17px}.scanstatus{font-size:11px;color:#b9c7da;margin-top:8px;line-height:1.45}.candidateGrid{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:9px}.prepTitle{grid-column:1/-1;color:#fbbf24;font-weight:900;border-top:1px solid #31455f;padding-top:9px;margin-top:4px}.cand{background:#0a1422;border:1px solid #2a3e59;border-radius:12px;padding:9px}.cand.prep{border-style:dashed;opacity:.92}.cand b{font-size:14px}.cand .cp{font-size:20px;font-weight:950;margin-top:2px}.cand small{display:block;color:#93a4b9;margin-top:2px}.method{font-size:10px;color:#8fa0b5;margin-top:7px;line-height:1.35}@media(max-width:720px){.candidateGrid{grid-template-columns:1fr 1fr 1fr}.cand{padding:7px}.cand .cp{font-size:17px}}
 @media(max-width:720px){body{padding:9px}.coins{grid-template-columns:repeat(3,minmax(260px,1fr));min-width:795px}.title h1{font-size:20px}.coin-title{font-size:19px}.price{font-size:24px}}
 /* V5.0 MADDE 13 — YATAY TELEFONDA ÜÇ COIN AYNI EKRANDA */
 @media(orientation:landscape) and (max-width:1024px){
@@ -224,6 +224,16 @@ function finderEntryQuality(x,kind='AUTO'){
 function compareFinderQuality(a,b){
  const qa=finderEntryQuality(a),qb=finderEntryQuality(b);
  return qb.historicalScore-qa.historicalScore||qa.historicDistance-qb.historicDistance||Number(a.p?.recovery?.advanceFromDipPct||0)-Number(b.p?.recovery?.advanceFromDipPct||0)||Math.abs(Number(a.p?.dist)||0)-Math.abs(Number(b.p?.dist)||0)||qb.profit-qa.profit||qb.rr-qa.rr||Number(b.candidate||0)-Number(a.candidate||0);
+}
+function preparationCandidate(x){
+ const p=x?.p||{},flow=moneyFlowModel(x),market=Number(p.marketEntry||x?.m?.price),limit=Number(p.conditionalEntry),stop=Number(p.stop),target=Number(p.mainTarget||p.t2||p.t1),marketRR=Number(p.marketRR),conditionalRR=Number(p.conditionalRR);
+ const conditionalPlan=limit>stop&&limit<market&&target>limit&&conditionalRR>=1.30;
+ const hardSafe=!!p.hasResistance&&Number(x?.spread)>=0&&Number(x.spread)<=.35&&stop>0&&stop<market&&!p.recovery?.confirmedSupportBreak&&(marketRR>=1.30||conditionalPlan)&&!(flow.distribution||(flow.status==='REAL'&&flow.m15<0&&flow.m30<0&&flow.h1<0&&Math.abs(flow.m15)*2>Math.abs(flow.m30)));
+ if(!hardSafe)return{eligible:false,label:'GÜVENLİK KAPISI BAŞARISIZ'};
+ const risk=finderRiskFlags(x),quality=finderEntryQuality(x);
+ if(risk.pullback)return{eligible:true,label:'PULLBACK BEKLE — MEVCUT FİYATTAN ALMA'};
+ if(quality.reason)return{eligible:true,label:`İZLE — ${quality.reason}`};
+ return{eligible:true,label:'İZLE — DÖNÜŞ/TEYİT BEKLE'};
 }
 function finderRiskFlags(x){const p=x?.p||{},m=x?.m||{},h=x?.h||{},rec=p.recovery||{},flow=moneyFlowModel(x),drops=rec.drops||{},severeDrop=Number(drops.d3)<=-8||Number(drops.d5)<=-12||Number(drops.d7)<=-18,weakRecovery=severeDrop&&flow.status==='REAL'&&flow.h1<0&&rec.state!=='TOPARLANMA TEYİDİ',fast15=Number(m.lastOpen)>0&&((Number(m.price)/Number(m.lastOpen)-1)*100)>=2.5,fast1h=Number(h.lastOpen)>0&&((Number(m.price)/Number(h.lastOpen)-1)*100)>=4,overheat=Number(m.rsi6)>=82||Number(m.rsi12)>=72||Number(m.rsi)>75,momentumHot=Number(m.rsi6)>=70||Number(m.rsi12)>=65||Number(m.rsi)>=68,entryGap=Number(p.marketEntry)>0&&Number(p.conditionalEntry)>0?(Number(p.marketEntry)/Number(p.conditionalEntry)-1)*100:0,anchorAdvance=Number(rec.advanceFromDipPct),multiDayAdvance=Number(rec.multiDayAdvancePct),recentAdvance=Number(rec.recentAdvancePct),advancedLate=recentAdvance>=12||multiDayAdvance>=18||anchorAdvance>=12||(anchorAdvance>=8&&(fast15||fast1h||momentumHot||entryGap>2.5))||(multiDayAdvance>=18&&(fast15||fast1h||momentumHot||entryGap>2.5)),chased=overheat||fast15||entryGap>2.5||advancedLate;return{severeDrop,weakRecovery,fast15,fast1h,overheat,momentumHot,entryGap,anchorAdvance,multiDayAdvance,recentAdvance,advancedLate,chased,pullback:weakRecovery||chased}}
 function flowLabel(v){return Number.isFinite(v)?(v>0?'GİRİŞ':v<0?'ÇIKIŞ':'NÖTR'):'VERİ YOK'}
@@ -623,29 +633,39 @@ async function findDaily3(opts={}){
   for(const x of metrics)x.scanState=entryState({...x,s:score(x.m,x.h,x.p)});
   const safeMetrics=metrics.filter(x=>!x.scanState.hard&&validPairs.has(x.name)),qualityMetrics=safeMetrics.filter(x=>!finderEntryQuality(x).reason&&!['WATCH','PULLBACK'].includes(x.scanState.key));
   qualityMetrics.sort(compareFinderQuality);
-  const winners=qualityMetrics.slice(0,3);
+  const winners=qualityMetrics.slice(0,3),winnerNames=new Set(winners.map(x=>x.name));
+  const preparation=metrics.filter(x=>validPairs.has(x.name)&&!winnerNames.has(x.name)&&preparationCandidate(x).eligible).sort(compareFinderQuality).slice(0,3);
 
   lastScanCandidates=Object.fromEntries(winners.map(x=>[x.name,x]));
+  if(typeof Notification!=='undefined'&&Notification.permission==='granted'){
+    // Names only; the Worker independently rebuilds the current technical plan.
+    void fetchWithTimeout(COIN_WORKER_API+'/alarm-evaluate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({coins:winners.map(x=>x.name)})},12000).catch(()=>{});
+  }
 
-  $('candidateGrid').innerHTML=winners.map((x,i)=>{
+  const winnerCards=winners.map((x,i)=>{
     const ok=true;
     const tracked=loadWatch().includes(x.name),st=x.scanState;
     const rec=x.p.recovery||{},flow=moneyFlowModel(x),active=loadPositions().some(p=>p.name===x.name),targetLine=`Ara ${fmt(x.p.interimTarget,6)} • Ana D1 ${fmt(x.p.mainTarget,6)}`;
     return `<div class="cand"><b>${st.key==='CONFIRMED'?'🟢':st.key==='CONDITIONAL'||st.key==='EARLY'||st.key==='LIMIT_WAIT'?'🟡':'👁'} ${st.label} • ${i+1}. ${x.name}/TRY</b><div class="statePill ${st.tone}">${active?'ALINDI / TAKİPTE':st.label}</div><div class="cp ${x.candidate>=75?'good':x.candidate>=60?'mid':''}">${x.candidate.toFixed(0)}/100</div><small>Piyasa ${fmt(x.p.marketEntry,6)} • koşullu ${fmt(x.p.conditionalEntry,6)} • uzaklık %${fmt((x.p.marketEntry/x.p.conditionalEntry-1)*100,2)}</small><small>Piyasa R/R 1:${fmt(x.p.marketRR,2)} • koşullu R/R 1:${fmt(x.p.conditionalRR,2)}</small><small>Ağırlıklı alan tahmini (komisyon hariç) yaklaşık +%${fmt(x.rpot.expectedEdge,2)} • brüt koşullu giriş→Ana D1 +%${fmt(x.rpot.upside1,2)}</small>${x.rpot.upside1<5?'<small class="bad">⚠️ KÂR ALANI DÜŞÜK — %5 minimum kâr alanının altında</small>':''}<small>Girişe göre kâr sınıfı: ${finderEntryQuality(x,st.key==='CONDITIONAL'?'CONDITIONAL':'MARKET').band}</small><small>${targetLine}</small><small>Destek mesafesi: ${x.p.dist>0?'+':''}${x.p.dist.toFixed(2)}%</small><small>15dk hacim: ${x.vRatio.toFixed(2)}× MA5</small><small>Spread: ${x.spread.toFixed(3)}%</small><small>24s TRY hacmi: ${fmt(x.qv,0)}</small><small>Para akışı 15dk/30dk/1s: ${flow.status==='REAL'?[flow.m15,flow.m30,flow.h1].map(v=>(v>=0?'+':'')+fmt(v,0)).join(' / '):'VERİ YOK'}${flow.distribution?' • DAĞITIM RİSKİ':''}</small><div class="respot"><b>3/5/7 GÜNLÜK DÖNÜŞ + TOPARLANMA</b><strong class="${rec.state==='TOPARLANMA TEYİDİ'?'potgood':rec.confirmedSupportBreak?'potbad':'potmid'}">${rec.state||'VERİ YOK'}</strong><small>Değişim 3g ${fmt(rec.drops?.d3,2)}% • 5g ${fmt(rec.drops?.d5,2)}% • 7g ${fmt(rec.drops?.d7,2)}%</small><small>Maksimum toparlanma alanı ≈ +%${fmt(rec.maxRecoveryPct,2)}</small></div><button class="trackBtn ${tracked||active?'tracked':''}" ${tracked||active?'disabled':''} onclick="trackOpportunity('${x.name}',this)">${active?'✅ ALINDI / TAKİPTE':tracked?'✅ TAKİPTE':'👁️ TAKİBE AL'}</button></div>`;
   }).join('');
+  const preparationCards=preparation.map((x,i)=>{
+    const plan=preparationCandidate(x),q=finderEntryQuality(x),tracked=loadWatch().includes(x.name),active=loadPositions().some(p=>p.name===x.name);
+    return `<div class="cand prep"><b>👁 ${i+1}. ${x.name}/TRY</b><div class="statePill yellow">${plan.label}</div><div class="cp ${x.candidate>=60?'mid':''}">${x.candidate.toFixed(0)}/100</div><small>Bu kart işlem sinyali değildir.</small><small>Piyasa/koşullu kâr alanı: %${fmt(q.marketProfit,2)} / %${fmt(q.conditionalProfit,2)}</small><small>Piyasa/koşullu R/R: 1:${fmt(x.p.marketRR,2)} / 1:${fmt(x.p.conditionalRR,2)}</small><small>Destek mesafesi: ${x.p.dist>0?'+':''}${fmt(x.p.dist,2)}%</small><button class="trackBtn ${tracked||active?'tracked':''}" ${tracked||active?'disabled':''} onclick="trackOpportunity('${x.name}',this)">${active?'✅ ALINDI / TAKİPTE':tracked?'✅ TAKİPTE':'👁️ TAKİBE AL'}</button></div>`;
+  }).join('');
+  $('candidateGrid').innerHTML=winnerCards+(preparationCards?`<div class="prepTitle">👁 HAZIRLIK / TAKİP LİSTESİ — ŞİMDİ AL SİNYALİ DEĞİL</div>${preparationCards}`:'');
 
   const goodCount=winners.filter(x=>x.scanState.key==='CONFIRMED').length;
   $('scanStatus').textContent=goodCount
     ?`✅ ${goodCount} piyasa girişi uygun; kalan kartlar koşullu/erken teyit bekleyen adaylardır.`
-    :winners.length===0?'ŞU ANDA UYGUN FIRSAT YOK':'🟡 Uygun piyasa AL yok; yalnız koşullu/erken teyit bekleyen adaylar gösteriliyor.';
+    :winners.length===0?(preparation.length?`ŞU ANDA İŞLEM YAPILABİLİR FIRSAT YOK • ${preparation.length} hazırlık/takip adayı`:'ŞU ANDA UYGUN FIRSAT YOK'):'🟡 Uygun piyasa AL yok; yalnız koşullu/erken teyit bekleyen adaylar gösteriliyor.';
 
   if(!opts.auto4h){
     $('scanStatus').textContent=goodCount===3
       ?'✅ Tarama tamamlandı • 3 piyasa girişi uygun • tarihsel dip ve giriş kalitesine göre sıralandı.'
-      :winners.length===0?'ŞU ANDA UYGUN FIRSAT YOK':`🟡 Tarama tamamlandı • ${goodCount} piyasa girişi uygun • ${winners.length} koşullu/erken teyit bekleyen aday.`;
+      :winners.length===0?(preparation.length?`ŞU ANDA UYGUN FIRSAT YOK • 0 işlem yapılabilir • ${preparation.length} hazırlık/takip adayı.`:'ŞU ANDA UYGUN FIRSAT YOK'):`🟡 Tarama tamamlandı • ${goodCount} piyasa girişi uygun • ${winners.length} koşullu/erken teyit bekleyen aday.`;
   }else{
     const body=winners.map((x,i)=>`${i+1}. ${x.name}/TRY • koşullu→Ana D1 brüt +%${fmt(x.rpot?.upside1,2)} • fırsat ${fmt(x.candidate,0)}/100`).join(' • ');
-    try{await showSystemNotification('🔎 4 Saatlik Yeni Coin Taraması',body,'coin-4h-scan')}catch(e){console.warn('4 saatlik tarama bildirimi gönderilemedi:',e)}
+    if(body)try{await showSystemNotification('🔎 4 Saatlik Yeni Coin Taraması',body,'coin-4h-scan')}catch(e){console.warn('4 saatlik tarama bildirimi gönderilemedi:',e)}
     localStorage.setItem('last4hScan',String(Date.now()));
     if(previousTracked.length)saveWatch(previousTracked);
   }
@@ -882,32 +902,12 @@ function positionAlertMemory(){try{return JSON.parse(localStorage.getItem(POSITI
 function savePositionAlertMemory(x){try{localStorage.setItem(POSITION_ALERT_KEY,JSON.stringify(x))}catch{}}
 const fastPositionAlertLocks=new Set();
 async function maybeFastLocalPositionAlert(pos,{price,stop,target,pnl,pullback}){
- if(!('Notification' in window)||Notification.permission!=='granted'||fastPositionAlertLocks.has(pos.id))return;
- let state='',title='',body='',cooldown=10*60*1000;
- if(stop>0&&price<=stop){state='STOP';title='🔴 CANLI STOP / RİSK';body=`${pos.name}/TRY • satış BID ${fmt(price,6)} • aktif stop ${fmt(stop,6)} • K/Z ${pnl.toFixed(2)}%`;cooldown=2*60*1000}
- else if(pnl>0&&pullback>=3){state='GIVEBACK3';title='🔴 KÂR GERİ VERME';body=`${pos.name}/TRY • zirveden %${pullback.toFixed(2)} geri çekildi • K/Z ${pnl.toFixed(2)}%`;cooldown=5*60*1000}
- else if(pnl>=3&&pullback>=2){state='GIVEBACK2';title='🟠 KÂRI KORU';body=`${pos.name}/TRY • zirveden %${pullback.toFixed(2)} geri çekildi • K/Z ${pnl.toFixed(2)}%`}
- else if(target>0&&price>=target){state='TARGET';title='🎯 TAHMİNİ DİRENÇ GELDİ';body=`${pos.name}/TRY • BID ${fmt(price,6)} • direnç ${fmt(target,6)} • K/Z ${pnl.toFixed(2)}%`}
- else if(target>0&&((target-price)/price*100)<=.8){state='TARGET_NEAR';title='🟡 TAHMİNİ DİRENCE ÇOK YAKIN';body=`${pos.name}/TRY • dirence %${Math.max(0,(target-price)/price*100).toFixed(2)} kaldı • K/Z ${pnl.toFixed(2)}%`}
- if(!state)return;
- const mem=positionAlertMemory(),prev=mem[pos.id]||{};
- if(prev.state===state&&Date.now()-Number(prev.at||0)<cooldown)return;
- fastPositionAlertLocks.add(pos.id);
- try{await showSystemNotification(title,body,'position-'+pos.id+'-'+state,coinDeepLink(pos.name,true));mem[pos.id]={state,at:Date.now()};savePositionAlertMemory(mem)}
- catch(e){console.warn('Canlı pozisyon alarmı:',e)}
- finally{fastPositionAlertLocks.delete(pos.id)}
+ // Kritik pozisyon bildirimlerinin tek göndericisi Worker → OneSignal'dır.
+ return false;
 }
 async function maybePositionAlert(pos,data,pnl,remaining,executionPrice=null){
- if(!('Notification' in window)||Notification.permission!=='granted')return;
- let state='HOLD', title='',body='';
- const price=Number(executionPrice)>0?Number(executionPrice):data.m.price,p=data.p;
- if(price<=p.stop){state='STOP';title='🔴 STOP / RİSK UYARISI';body=`${pos.name}/TRY • fiyat ${fmt(price,6)} • stop ${fmt(p.stop,6)} • K/Z ${pnl.toFixed(2)}%`;}
- else if(remaining<=0){state='TARGET';title='🎯 TAHMİNİ DİRENÇ GELDİ';body=`${pos.name}/TRY • Tahmini Direnç-1 ${fmt(p.t1,6)} • K/Z ${pnl.toFixed(2)}%`;}
- else if(remaining<=0.8){state='TARGET_NEAR';title='🟡 TAHMİNİ DİRENCE ÇOK YAKIN';body=`${pos.name}/TRY • tahmini dirence %${remaining.toFixed(2)} kaldı • K/Z ${pnl.toFixed(2)}%`;}
- else if(data.m.rsi>72 && data.m.hist<data.m.prevHist){state='MOMENTUM_WEAK';title='🟠 KÂRI KORU';body=`${pos.name}/TRY • RSI ${fmt(data.m.rsi,1)} ve momentum zayıflıyor • K/Z ${pnl.toFixed(2)}%`;}
- if(state==='HOLD')return;
- const mem=positionAlertMemory(), prev=mem[pos.id]; if(prev?.state===state && Date.now()-prev.at<30*60*1000)return;
- try{await showSystemNotification(title,body,'position-'+pos.id+'-'+state,coinDeepLink(pos.name,true));mem[pos.id]={state,at:Date.now()};savePositionAlertMemory(mem)}catch(e){console.warn('Pozisyon bildirimi:',e)}
+ // Kritik pozisyon bildirimlerinin tek göndericisi Worker → OneSignal'dır.
+ return false;
 }
 
 // ===== V4.9 HABER / OLAY ve KÂR KORUMA MOTORU =====
@@ -1400,11 +1400,7 @@ async function liveNotify(results){
    const crossedBuy=Number.isFinite(old.buy)&&old.buy<7.5&&buy>=7.5;
    const cool=now-Number(old.notifiedAt||0)>15*60*1000;
    let msg='';
-   if(st==='TARGET_REACHED' && old.state!=='TARGET_REACHED')msg=`🎯 ${r.name}/TRY Hedef-1'e ulaştı/geçti. Çıkışı değerlendir.`;
-   else if(st==='TARGET_NEAR' && old.state!=='TARGET_NEAR')msg=`🎯 ${r.name}/TRY Hedef-1'e çok yakın. Kalan yaklaşık %${fmt(Math.max(0,pp),2)}.`;
-   else if(st==='CONFIRMED' && old.state!=='CONFIRMED')msg=`🟢 ${r.name}/TRY TEYİTLİ GİRİŞ • AL ${buy}/10 • H1 potansiyeli %${fmt(pp,2)}.`;
-   else if(st==='CONDITIONAL' && old.state!=='CONDITIONAL')msg=`🟡 ${r.name}/TRY KOŞULLU GİRİŞ HAZIR • şimdi piyasa girişi değil • limit ${fmt(r.data.p.conditionalEntry,6)} • koşullu R/R 1:${fmt(r.data.p.conditionalRR,2)}.`;
-   else if(st==='PULLBACK' && old.state!=='PULLBACK')msg=`👁 ${r.name}/TRY PULLBACK BEKLE • mevcut fiyattan erken giriş değil; koşullu plan güncel veride yeniden doğrulanmalı.`;
+   if(st==='PULLBACK' && old.state!=='PULLBACK')msg=`👁 ${r.name}/TRY PULLBACK BEKLE • mevcut fiyattan erken giriş değil; koşullu plan güncel veride yeniden doğrulanmalı.`;
    else if(st==='LIMIT_WAIT' && old.state!=='LIMIT_WAIT')msg=`🟡 ${r.name}/TRY LİMİT BÖLGESİNDE • güncel dönüş teyidi bekleniyor.`;
    else if(st==='EARLY' && old.state!=='EARLY')msg=`🟡 ${r.name}/TRY ERKEN FIRSAT / HAZIRLAN • doğrudan piyasa AL sinyali değildir.`;
    else if(st==='READY' && old.state!=='READY')msg=`🟡 ${r.name}/TRY HAZIRLAN • desteğe yakın ve erken momentum oluşuyor.`;
@@ -1625,7 +1621,7 @@ async function saveSWSettings(names,analyses=[]){
    const name=String(item?.name||'').trim().toUpperCase().replace(/[^A-Z0-9]/g,''),d=item?.data||item;
    if(!allowed.has(name)||!d?.p||!d?.s)return null;
    return {
-     name,state:entryState(d,name).key,buy:Number(d.s.buy),candidate:Number(d.candidate||0),spread:Number(d.spread),ch:Number(d.ch||0),
+     name,state:entryState(d,name).key,eventAt:Number(d.freshness?.closes?.[0])||Math.floor(Date.now()/900000)*900000,buy:Number(d.s.buy),candidate:Number(d.candidate||0),spread:Number(d.spread),ch:Number(d.ch||0),
      p:{status:String(d.p.status||''),dist:Number(d.p.dist),near:Boolean(d.p.near),bounce:Boolean(d.p.bounce),hasResistance:Boolean(d.p.hasResistance),stop:Number(d.p.stop),t1:Number(d.p.t1),t2:Number(d.p.t2),interimTarget:Number(d.p.interimTarget),mainTarget:Number(d.p.mainTarget),marketEntry:Number(d.p.marketEntry),conditionalEntry:Number(d.p.conditionalEntry),marketRR:Number(d.p.marketRR),conditionalRR:Number(d.p.conditionalRR),rr:Number(d.p.rr)},
      rpot:{eligible:Boolean(d.rpot?.eligible),upside1:Number(d.rpot?.upside1),expectedEdge:Number(d.rpot?.expectedEdge),realizable:Number(d.rpot?.realizable),score:Number(d.rpot?.score),rr:Number(d.rpot?.rr),marketRR:Number(d.rpot?.marketRR),conditionalRR:Number(d.rpot?.conditionalRR)}
    };

@@ -1,3 +1,4 @@
+import { CriticalAlarm } from './critical-alarm.mjs';
 // Coin Analiz V5.1 Worker — hızlı pozisyon alarmı + 15dk/1saat arka plan push
 // Analiz, giriş ve çıkış kararlarının tamamı aynı borsanın (Binance TR) TRY piyasasını kullanır.
 const BINANCE_24H_URLS = [
@@ -15,6 +16,7 @@ const TRACK_COUNT = 3;
 const STATE_KEY = 'coin-analiz-state-v2';
 const POSITION_STATE_KEY = 'coin-analiz-positions-v1';
 const ALERT_MEMORY_KEY = 'coin-analiz-alert-memory-v1';
+const CRITICAL_PUSH_TYPES = new Set(['BUY_READY','CONDITIONAL_READY','TARGET_NEAR','TARGET_HIT','POSITION_STOP','POSITION_GIVEBACK_3','POSITION_GIVEBACK_2','POSITION_TARGET','POSITION_TARGET_NEAR']);
 const APP_ORIGIN = 'https://fatihhanfan-orhan.github.io';
 const EXCLUDED_BASES = new Set(['BTC','ETH','USDT','USDC','FDUSD','DAI','TRY','EUR']);
 
@@ -27,6 +29,19 @@ export default {
     }
 
     try {
+      if (['/alarm-ack','/alarm-status'].includes(url.pathname) && request.method==='POST') {
+        if (!env.OPPORTUNITY_ALARMS) return json({ok:false},503);
+        const body=await request.json().catch(()=>({}));
+        if(!/^[A-Z0-9]{2,20}$/.test(body.coin||'') || String(body.token||'').length!==72) return json({ok:false},400);
+        const stub=env.OPPORTUNITY_ALARMS.get(env.OPPORTUNITY_ALARMS.idFromName(body.coin));
+        const response=await stub.fetch('https://alarm/'+(url.pathname==='/alarm-ack'?'ack':'status'),{method:'POST',body:JSON.stringify(body)});
+        const result=cors(response);result.headers.set('Cache-Control','no-store');return result;
+      }
+      if(url.pathname==='/alarm-evaluate' && request.method==='POST') {
+        if(!isTrustedAppRequest(request,env)&&!isAdminRequest(request,env))return json({ok:false},403);
+        const body=await request.json().catch(()=>({}));
+        return json({ok:true,results:await evaluateCriticalCandidates(env,normalizeNames(body.coins||[]).slice(0,3))});
+      }
       if (url.pathname === '/' || url.pathname === '/health') {
         const state = await loadState(env);
         return json({
@@ -118,14 +133,22 @@ export default {
 
         const previous = await loadState(env);
         const syncedAt = new Date().toISOString();
+        const tracked = sortByProfit(good).slice(0, TRACK_COUNT);
+        const criticalAlerts = await buildPositionAlerts(env, previous.tracked || [], tracked);
         const next = {
           ...previous,
-          tracked: sortByProfit(good).slice(0, TRACK_COUNT),
+          tracked,
           trackedSource: synced.length ? 'web-analysis' : 'web-selection',
           trackedSyncedAt: syncedAt,
           source: synced.length ? 'web-analysis' : 'web-selection',
           updatedAt: syncedAt
         };
+        if (criticalAlerts.length) {
+          await sendOneSignal(env, criticalAlerts);
+          for (const alert of criticalAlerts) await markAlertSent(env, alert);
+          next.lastAlerts = criticalAlerts;
+          next.lastCriticalNotificationAt = syncedAt;
+        }
         await saveState(env, next);
         return json({ ok:true, tracked: next.tracked, updatedAt: next.updatedAt });
       }
@@ -185,9 +208,47 @@ export default {
       hourly: quarterHourly && minute === 0,
       fourHourly
     }));
+    if(env.CRITICAL_ALARM_ENABLED==='true' && env.OPPORTUNITY_ALARMS)ctx.waitUntil((async()=>{
+      const state=await loadState(env);
+      await evaluateCriticalCandidates(env,normalizeNames([...(state.marketTop3||[]),...(state.tracked||[])].map(x=>x.name)).slice(0,3));
+    })());
   }
 };
 
+
+async function evaluateCriticalCandidates(env,names) {
+  if(env.CRITICAL_ALARM_ENABLED!=='true'||!env.OPPORTUNITY_ALARMS)return [];
+  return Promise.all(names.map(async coin=>{
+    const stub=env.OPPORTUNITY_ALARMS.get(env.OPPORTUNITY_ALARMS.idFromName(coin));
+    try{return await (await stub.fetch('https://alarm/start',{method:'POST',body:JSON.stringify({coin})})).json();}
+    catch{return {ok:false,coin,reason:'REVALIDATION_UNAVAILABLE'};}
+  }));
+}
+
+function criticalOpportunity(x,now=Date.now()) {
+  const f=x?.freshness,p=x?.p||{},flow=x?.flow||{};
+  if(!f||!Number.isFinite(f.quoteAt)||now-f.quoteAt>15000||f.quoteAt>now||!Array.isArray(f.closes)||
+    ![900000,3600000,14400000,86400000].every((step,i)=>Number.isFinite(f.closes[i])&&f.closes[i]<=now&&now-f.closes[i]<=step+90000))return null;
+  if(flow.status!=='REAL'||!Number.isFinite(Number(x.qv))||!(x.qv>0)||hardGateReason(x))return null;
+  const kind=candidateState(x);
+  // Notification strength only: does not change Finder scores or entry gates.
+  if(kind!=='BUY' && !(kind==='CONDITIONAL'&&p.supportSource==='HORIZONTAL'&&
+    p.conditionalRR>=2&&x.vRatio>=1&&flow.m15?.net>0&&flow.h1?.net>=0))return null;
+  const entry=Number(kind==='BUY'?p.marketEntry:p.conditionalEntry),stop=Number(p.stop),target=Number(p.mainTarget),rr=(target-entry)/(entry-stop);
+  if(![entry,stop,target,rr].every(Number.isFinite)||!(stop>0&&entry>stop&&target>entry&&rr>=1.30))return null;
+  return {kind,entry,stop,target,rr};
+}
+async function validateCriticalCoin(coin) {
+  if(EXCLUDED_BASES.has(coin))return null;
+  const [tickers,books]=await Promise.all([all24hTickers(),allBookTickers()]);
+  if(!validTryPairs(tickers,books).has(coin))return null;
+  const ticker=tickers.find(t=>baseFromSymbol(String(t.symbol||t.s||''))===coin);
+  const x=await analyzeCandidate(coin,ticker,new Map(books.map(b=>[String(b.symbol||b.s||''),b])),true);
+  return criticalOpportunity(x);
+}
+export class OpportunityAlarm extends CriticalAlarm {
+  constructor(ctx,env){super(ctx,env,validateCriticalCoin);}
+}
 
 async function backgroundCycle(env, opts = {}) {
   const previous = await loadState(env);
@@ -287,7 +348,7 @@ async function backgroundCycle(env, opts = {}) {
     const sent = await notifySafely('position-alerts', () => sendOneSignal(env, positionAlerts));
     if (sent) {
       state.pendingAlerts = [];
-      for (const alert of positionAlerts) await markAlertSent(env, alert.type, alert.name);
+      for (const alert of positionAlerts) await markAlertSent(env, alert);
       const criticalAlerts = positionAlerts.filter(x => String(x?.type || '').startsWith('POSITION_'));
       if (criticalAlerts.length) {
         state.lastCriticalNotificationAt = new Date().toISOString();
@@ -431,10 +492,14 @@ async function buildPositionAlerts(env, prevList, nowList) {
     });
   }
 
-  const deduped = dedupeAlerts(candidates);
+  const nowByName = new Map(nowList.map(x => [cleanBase(x.name), x]));
+  const deduped = dedupeAlerts(candidates).map(alert => ({
+    ...alert,
+    eventId:criticalEventId(alert, nowByName.get(cleanBase(alert.name)))
+  }));
   const allowed = [];
   for (const a of deduped) {
-    if (await alertAllowed(env, a.type, a.name)) allowed.push(a);
+    if (await alertAllowed(env, a)) allowed.push(a);
   }
   return allowed.slice(0, 4);
 }
@@ -473,8 +538,8 @@ async function monitorActivePositions(env, savedPositions, notify, analysisByNam
       positions.push(current);
       if (!notify) continue;
 
-      const alert = buildPositionRiskAlert({name, price, stop, target, entry, highWater, pnl, pullback, remaining});
-      if (alert && await alertAllowed(env, alert.type, name)) alerts.push(alert);
+      const alert = buildPositionRiskAlert({name, positionId:saved.createdAt||entry, price, stop, target, entry, highWater, pnl, pullback, remaining});
+      if (alert && await alertAllowed(env, alert)) alerts.push(alert);
     } catch (e) {
       positions.push({ ...saved, name, entry, lastError:String(e?.message || e), checkedAt:new Date().toISOString() });
     }
@@ -482,21 +547,22 @@ async function monitorActivePositions(env, savedPositions, notify, analysisByNam
   return { positions, alerts };
 }
 
-function buildPositionRiskAlert({name, price, stop, target, entry, highWater, pnl, pullback, remaining}) {
+function buildPositionRiskAlert({name, positionId, price, stop, target, entry, highWater, pnl, pullback, remaining}) {
+  const make=(type,title,body)=>({type,name,title,body,eventId:`${type}:${name}:${positionId||entry}`});
   if (stop > 0 && price <= stop) {
-    return {type:'POSITION_STOP',name,title:`🔴 ${name}/TRY — STOP / RİSK`,body:`Fiyat ${fmtPrice(price)} • stop ${fmtPrice(stop)} • K/Z ${fmtPct(pnl)}. Uygulamayı açıp pozisyonu kontrol et.`};
+    return make('POSITION_STOP',`🔴 ${name}/TRY — STOP / RİSK`,`Fiyat ${fmtPrice(price)} • stop ${fmtPrice(stop)} • K/Z ${fmtPct(pnl)}. Uygulamayı açıp pozisyonu kontrol et.`);
   }
   if (pnl > 0 && pullback >= 3) {
-    return {type:'POSITION_GIVEBACK_3',name,title:`🔴 ${name}/TRY — KÂR GERİ VERME %${fmt2(pullback)}`,body:`Zirve ${fmtPrice(highWater)} • fiyat ${fmtPrice(price)} • K/Z ${fmtPct(pnl)}. Çıkış/koruma kararını kontrol et.`};
+    return make('POSITION_GIVEBACK_3',`🔴 ${name}/TRY — KÂR GERİ VERME %${fmt2(pullback)}`,`Zirve ${fmtPrice(highWater)} • fiyat ${fmtPrice(price)} • K/Z ${fmtPct(pnl)}. Çıkış/koruma kararını kontrol et.`);
   }
   if (pnl >= 3 && pullback >= 2) {
-    return {type:'POSITION_GIVEBACK_2',name,title:`🟠 ${name}/TRY — KÂRI KORU`,body:`Zirveden geri çekilme %${fmt2(pullback)} • K/Z ${fmtPct(pnl)}. Akıllı Satış V2 kararını kontrol et.`};
+    return make('POSITION_GIVEBACK_2',`🟠 ${name}/TRY — KÂRI KORU`,`Zirveden geri çekilme %${fmt2(pullback)} • K/Z ${fmtPct(pnl)}. Akıllı Satış V2 kararını kontrol et.`);
   }
   if (Number.isFinite(remaining) && remaining <= 0) {
-    return {type:'POSITION_TARGET',name,title:`🎯 ${name}/TRY — TAHMİNİ DİRENÇ GELDİ`,body:`Fiyat ${fmtPrice(price)} • tahmini direnç ${fmtPrice(target)} • K/Z ${fmtPct(pnl)}.`};
+    return make('POSITION_TARGET',`🎯 ${name}/TRY — TAHMİNİ DİRENÇ GELDİ`,`Fiyat ${fmtPrice(price)} • tahmini direnç ${fmtPrice(target)} • K/Z ${fmtPct(pnl)}.`);
   }
   if (Number.isFinite(remaining) && remaining <= 0.8) {
-    return {type:'POSITION_TARGET_NEAR',name,title:`🟡 ${name}/TRY — DİRENCE ÇOK YAKIN`,body:`Tahmini dirence %${fmt2(Math.max(0,remaining))} kaldı • K/Z ${fmtPct(pnl)}.`};
+    return make('POSITION_TARGET_NEAR',`🟡 ${name}/TRY — DİRENCE ÇOK YAKIN`,`Tahmini dirence %${fmt2(Math.max(0,remaining))} kaldı • K/Z ${fmtPct(pnl)}.`);
   }
   return null;
 }
@@ -649,8 +715,8 @@ async function runFastPositionCycle(env, scheduledAt, scheduleMeta = {}) {
       delete current.lastError;
       checked.push(current);
 
-      const alert = buildPositionRiskAlert({name, price, stop, target, entry, highWater, pnl, pullback, remaining});
-      if (alert && await alertAllowed(env, alert.type, name)) alerts.push(alert);
+      const alert = buildPositionRiskAlert({name, positionId:saved.createdAt||entry, price, stop, target, entry, highWater, pnl, pullback, remaining});
+      if (alert && await alertAllowed(env, alert)) alerts.push(alert);
     } catch (e) {
       checked.push({ ...saved, name, entry, lastError:String(e?.message || e), fastCheckedAt:scheduledAt || new Date().toISOString() });
     }
@@ -686,7 +752,7 @@ async function runFastPositionCycle(env, scheduledAt, scheduleMeta = {}) {
   if (alerts.length) {
     try {
       await sendOneSignal(env, alerts);
-      for (const alert of alerts) await markAlertSent(env, alert.type, alert.name);
+      for (const alert of alerts) await markAlertSent(env, alert);
       state.lastCriticalNotificationAt = new Date().toISOString();
     } catch (e) {
       notificationErrors.push(`fast-position-alerts: ${String(e?.message || e)}`);
@@ -699,11 +765,17 @@ async function runFastPositionCycle(env, scheduledAt, scheduleMeta = {}) {
   return {ok:true, checked:positions.length, alerts:alerts.length};
 }
 
-async function alertAllowed(env, type, name) {
+function criticalEventId(alert, analysis) {
+  const eventAt=Number(analysis?.eventAt)||Number(analysis?.freshness?.closes?.[0])||Math.floor(Date.now()/900000)*900000;
+  return `${alert.type}:${cleanBase(alert.name)}:${eventAt}`;
+}
+
+async function alertAllowed(env, alertOrType, legacyName) {
+  const alert=typeof alertOrType==='object'?alertOrType:{type:alertOrType,name:legacyName};
   if (!env.COIN_KV) return true;
-  const key = `${ALERT_MEMORY_KEY}:${type}:${name}`;
+  const key = `${ALERT_MEMORY_KEY}:${alert.eventId||`${alert.type}:${alert.name}`}`;
   const last = Number(await env.COIN_KV.get(key) || 0);
-  return !(last && Date.now()-last < alertCooldownMs(type));
+  return !(last && Date.now()-last < alertCooldownMs(alert.type));
 }
 
 function alertCooldownMs(type) {
@@ -715,10 +787,11 @@ function alertCooldownMs(type) {
   return 90 * 60 * 1000;
 }
 
-async function markAlertSent(env, type, name) {
+async function markAlertSent(env, alertOrType, legacyName) {
+  const alert=typeof alertOrType==='object'?alertOrType:{type:alertOrType,name:legacyName};
   if (!env.COIN_KV) return;
-  const key = `${ALERT_MEMORY_KEY}:${type}:${name}`;
-  await env.COIN_KV.put(key, String(Date.now()), { expirationTtl: 6*60*60 });
+  const key = `${ALERT_MEMORY_KEY}:${alert.eventId||`${alert.type}:${alert.name}`}`;
+  await env.COIN_KV.put(key, String(Date.now()), { expirationTtl: 24*60*60 });
 }
 
 async function sendQuarterHourSummary(env, tracked) {
@@ -775,7 +848,7 @@ async function sendStoredQuarterSummary(env, scheduledAt, opts = {}) {
     if (sent) {
       pendingAlerts = [];
       for (const alert of alerts.filter(x => String(x?.type || '').startsWith('POSITION_'))) {
-        await markAlertSent(env, alert.type, alert.name);
+        await markAlertSent(env, alert);
       }
     }
   }
@@ -938,7 +1011,7 @@ function enrichRecoveryPlan(p,k15,k1h,k4h,k1d,m,h,flow,spread){
   p.recovery={history:history.context,asOf:history.asOf,drops,drawdowns,changeReferenceAt,recentAdvancePct,higherLow,base,reclaim,fourHourHold,fourHourFalling,newLow,sellingPressure,confirmedSupportBreak,confirmations,state,dipReference,advanceFromDipPct,multiDayReference,multiDayAdvancePct,nearTarget:p.interimTarget,mainTarget:p.mainTarget,maxRecoveryLevel:priorPeak,maxRecoveryPct,guaranteed:false};return p;
 }
 
-async function analyzeCandidate(name, t24, bookMap = new Map()) {
+async function analyzeCandidate(name, t24, bookMap = new Map(), freshAlarmQuote = false) {
   const [a,b,k4h,daily,orders] = await Promise.all([klines(name,'15m'), klines(name,'1h'), klines(name,'4h'), klines(name,'1d'), fetchOrderFlow(name)]);
   const m = calc(a), h = calc(b);
   m.closedPrice = m.price;
@@ -947,7 +1020,8 @@ async function analyzeCandidate(name, t24, bookMap = new Map()) {
   if (!ticker) {
     ticker = await ticker24(name).catch(() => ({}));
   }
-  const bk = bookMap.get(name+'TRY') || bookMap.get(name+'_TRY') || {};
+  const bk = freshAlarmQuote ? await fetchBinanceTrBookTicker(name,3500) : bookMap.get(name+'TRY') || bookMap.get(name+'_TRY') || {};
+  const quoteAt = Date.now();
   const bid = num(bk,'bidPrice','b') || num(ticker,'bidPrice','b');
   const ask = num(bk,'askPrice','a') || num(ticker,'askPrice','a');
   const currentPrice = ask || num(ticker,'lastPrice','c','price');
@@ -966,6 +1040,7 @@ async function analyzeCandidate(name, t24, bookMap = new Map()) {
   const trend = (m.ema9>m.ema21?1:0)+(h.ema9>h.ema21?1:0)+(m.macd>m.signal?1:0)+(m.hist>m.prevHist?1:0);
   const flow=buildFlowContext(a,orders,m),p = enrichRecoveryPlan(tradePlan(a,b,m,h),a,b,k4h,daily,m,h,flow,spread);
   const fastMode=vRatio>=1.8&&Math.abs((m.price/m.closedPrice-1)*100)>=Math.max(.8,vola*.7),out = { name,qv,marketCap:NaN,marketCapStatus:'VERİ YOK',ch,spread,vRatio,impulse,vola,fastMode,trend,buy:score(m,h,p).buy,m,h,p,flow };
+  out.freshness={quoteAt,closes:[a,b,k4h,daily].map(rows=>Number(rows.at(-1)?.[6]))};
   out.rpot = resistancePotential(out);
   return out;
 }
@@ -1194,7 +1269,7 @@ async function sendOneSignal(env,alerts){
   if(!env.ONESIGNAL_APP_ID || !env.ONESIGNAL_API_KEY)throw new Error('OneSignal yapılandırması eksik.');
   const title=alerts.length===1?alerts[0].title:'Coin Analiz — Takip Uyarısı';
   const body=alerts.length===1?alerts[0].body:alerts.map(a=>`${a.name}/TRY: ${a.body}`).join('\n');
-  const critical=alerts.some(a=>String(a?.type||'').startsWith('POSITION_'));
+  const critical=alerts.some(a=>CRITICAL_PUSH_TYPES.has(String(a?.type||'')));
   const appUrl = new URL(env.APP_URL||'https://fatihhanfan-orhan.github.io/Coin-analiz/');
   if(alerts.length===1 && alerts[0].name){
     appUrl.searchParams.set('coin',cleanBase(alerts[0].name));
@@ -1249,6 +1324,7 @@ function normalizeSyncedAnalyses(rows, allowedNames = []) {
     result.push({
       name,
       state:String(row?.state||''),
+      eventAt:clampNumber(row?.eventAt,0,Date.now(),Math.floor(Date.now()/900000)*900000),
       buy,
       candidate:clampNumber(row?.candidate,0,100,0),
       spread:clampNumber(row?.spread,0,100,99),
