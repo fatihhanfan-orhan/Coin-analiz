@@ -922,8 +922,7 @@ async function scanMarket() {
 }
 
 function validTryPairs(tickers,books){
-  const live=new Set((books||[]).filter(x=>num(x,'bidPrice','b')>0&&num(x,'askPrice','a')>0).map(x=>String(x.symbol||x.s||'')));
-  return new Set((tickers||[]).filter(t=>{const sym=String(t.symbol||t.s||''),base=baseFromSymbol(sym);return /_?TRY$/.test(sym)&&base&&num(t,'quoteVolume','q','volumeQuote','quoteAssetVolume')>0&&(live.has(sym)||live.has(base+'TRY')||live.has(base+'_TRY'));}).map(t=>baseFromSymbol(String(t.symbol||t.s||''))));
+  return new Set((tickers||[]).filter(t=>{const sym=String(t.symbol||t.s||''),base=baseFromSymbol(sym);return /_?TRY$/.test(sym)&&base&&num(t,'quoteVolume','q','volumeQuote','quoteAssetVolume')>0;}).map(t=>baseFromSymbol(String(t.symbol||t.s||''))));
 }
 
 function hardGateReason(x){
@@ -935,16 +934,16 @@ function finderEntryQuality(x,kind='AUTO'){
  const p=x?.p||{},rec=p.recovery||{},history=rec.history||{},risk=finderRiskFlags(x),target=Number(p.mainTarget),market=Number(p.marketEntry),limit=Number(p.conditionalEntry),stop=Number(p.stop);
  const area=entry=>entry>0&&target>entry?(target-entry)/entry*100:NaN;
  const marketProfit=area(market),conditionalProfit=area(limit);
- const marketEligible=marketProfit>=5-1e-9&&Number(p.marketRR)>=1.30&&stop>0&&stop<market;
- const conditionalEligible=p.supportSource==='HORIZONTAL'&&limit>stop&&limit<market&&conditionalProfit>=5-1e-9&&Number(p.conditionalRR)>=1.30;
+ const marketEligible=marketProfit>0&&Number(p.marketRR)>=1.30&&stop>0&&stop<market;
+ const conditionalEligible=p.supportSource==='HORIZONTAL'&&limit>stop&&limit<market&&conditionalProfit>0&&Number(p.conditionalRR)>=1.30;
  const periods=['week','month','quarter','year'].map(k=>history[k]).filter(v=>(v?.complete||Number(v?.bars)>=7)&&Number(v.low)>0);
  const historicDistance=periods.length?Math.max(...periods.map(v=>Math.max(0,(market/Number(v.low)-1)*100))):Infinity;
  const historicalScore=periods.length?periods.reduce((sum,v)=>sum+Math.max(0,1-Math.max(0,(market/Number(v.low)-1)*100)/12),0)/periods.length*30:0;
  const selectedKind=kind==='AUTO'?(marketEligible&&p.bounce&&Number(x.s?.buy??x.buy)>=7?'MARKET':conditionalEligible?'CONDITIONAL':'MARKET'):kind;
  const profit=selectedKind==='MARKET'?marketProfit:selectedKind==='CONDITIONAL'?conditionalProfit:NaN;
  const eligible=kind==='MARKET'?marketEligible:kind==='CONDITIONAL'?conditionalEligible:marketEligible||conditionalEligible;
- const reason=risk.pullback?'GEÇ GİRİŞ / PULLBACK BEKLE':!history.week?.complete?'TARİHSEL VERİ EKSİK':historicDistance>=12?'TARİHSEL DİPTEN UZAK':!eligible?'KÂR ALANI %5 / R/R ŞARTI SAĞLANMADI':'';
- return{selectedKind,rr:Number(selectedKind==='MARKET'?p.marketRR:p.conditionalRR),reason,marketEligible,conditionalEligible,marketProfit,conditionalProfit,profit,historicalScore,historicDistance,band:profit>=12?'ÇOK GÜÇLÜ':profit>=8?'GÜÇLÜ':profit>=5-1e-9?'NORMAL':'ELENDİ'};
+ const reason=risk.pullback?'GEÇ GİRİŞ / PULLBACK BEKLE':!history.week?.complete?'TARİHSEL VERİ EKSİK':!eligible?'HEDEF / R/R ŞARTI SAĞLANMADI':'';
+ return{selectedKind,rr:Number(selectedKind==='MARKET'?p.marketRR:p.conditionalRR),reason,marketEligible,conditionalEligible,marketProfit,conditionalProfit,profit,historicalScore,historicDistance,band:profit>=12?'ÇOK GÜÇLÜ':profit>=8?'GÜÇLÜ':profit>=3-1e-9?'NORMAL':'DÜŞÜK — KALİTE UYARISI'};
 }
 function compareFinderQuality(a,b){
  const qa=finderEntryQuality(a),qb=finderEntryQuality(b);
@@ -1093,7 +1092,7 @@ function resistancePotential(x){
   const signedDist=Number(p.dist??99), dist=Math.abs(signedDist);
 
   const chosenQuality=finderEntryQuality(x),rankProfit=chosenQuality.profit;
-  const profitScore=rankProfit>=12?10:rankProfit>=8?7.5:rankProfit>=5-1e-9?5:0;
+  const profitScore=rankProfit>=12?10:rankProfit>=8?7.5:rankProfit>=3-1e-9?5:Math.max(0,rankProfit);
 
   let reach=0; reach+=(trend/4)*4; reach+=(Math.min(v,1.8)/1.8)*2.5;
   if(rsiV>=45&&rsiV<=67)reach+=1.5; else if(rsiV>=38&&rsiV<45)reach+=.8; else if(rsiV>72)reach-=1;

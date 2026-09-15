@@ -18,21 +18,21 @@ function app(source=html){const c=environment();for(const match of source.matchA
 function edge(){const c=environment();vm.runInContext(fs.readFileSync(new URL('critical-alarm.mjs',root),'utf8').replace(/export /g,'')+'\n'+worker.replace(/^import .*critical-alarm.mjs';\r?\n/m,'').replace('export class OpportunityAlarm','class OpportunityAlarm').replace('export default {','const handler = {'),c);return c;}
 function run(c,code){return vm.runInContext(code,c);}
 function fixture(){return {name:'HEMI',buy:8,s:{buy:8},spread:.1,vRatio:1.2,m:{price:100,lastOpen:99,closedPrice:100,rsi:50,rsi6:52,rsi12:50,hist:2,prevHist:1,kdjK:55,kdjD:50},h:{lastOpen:99},flow:{status:'REAL',m15:{net:10},m30:{net:20},h1:{net:40},distribution:false},p:{marketEntry:100,conditionalEntry:99,stop:98,marketRR:1.3,conditionalRR:2,hasResistance:true,mainTarget:105,supportSource:'HORIZONTAL',zoneLow:98.8,zoneHigh:99,dist:1,near:false,bounce:false,recovery:{history:{week:{complete:true,low:98},month:{complete:true,low:98},quarter:{complete:true,low:98},year:{complete:false}},base:true,state:'DÖNÜŞ ADAYI',advanceFromDipPct:2,multiDayAdvancePct:3}}};}
-test('normal push: 4.5% market / 5.56% conditional cannot produce market-entry notification',async()=>{
+test('normal push follows the final market decision after profit becomes a ranking reference',async()=>{
  const a=app(),w=edge();run(w,'alertAllowed=async()=>true');
  const x=fixture();x.p.mainTarget=104.5;x.p.marketRR=2.25;x.p.conditionalRR=5.5;x.p.bounce=true;x.p.dist=.1;
  const previous=structuredClone(x);previous.p.mainTarget=101;previous.buy=5;previous.s.buy=5;previous.p.dist=2;previous.state='BUY';
  w.x=x;w.previous=previous;
- assert.equal(a.entryState(x).key,'CONDITIONAL');assert.equal(run(w,'candidateState(x)'),'CONDITIONAL');
+ assert.equal(a.entryState(x).key,'CONFIRMED');assert.equal(run(w,'candidateState(x)'),'BUY');
  assert.equal(w.finderEntryQuality(x,'MARKET').profit,4.5);assert.equal(w.finderEntryQuality(x,'CONDITIONAL').profit.toFixed(2),'5.56');
  let alerts=await run(w,'buildPositionAlerts({},[previous],[x])');
- assert.deepEqual(Array.from(alerts,a=>a.type),['CONDITIONAL_READY']);assert.ok(alerts.every(a=>!a.title.includes('TEYİTLİ PİYASA')));
- alerts=await run(w,'buildPositionAlerts({},[],[x])');assert.deepEqual(Array.from(alerts,a=>a.type),['CONDITIONAL_READY']);
- w.previous=structuredClone(x);w.previous.p.bounce=false;
- alerts=await run(w,'buildPositionAlerts({},[previous],[x])');assert.equal(alerts.length,0,'unchanged conditional state does not duplicate or upgrade');
+ assert.ok(Array.from(alerts,a=>a.type).includes('BUY_READY'));
+ alerts=await run(w,'buildPositionAlerts({},[],[x])');assert.ok(Array.from(alerts,a=>a.type).includes('BUY_READY'));
+ w.previous=structuredClone(x);
+ alerts=await run(w,'buildPositionAlerts({},[previous],[previous])');assert.equal(alerts.length,0,'unchanged final state does not duplicate');
  w.previous=structuredClone(x);x.p.mainTarget=106;x.p.marketRR=3;x.p.conditionalRR=7;
  assert.equal(a.entryState(x).key,'CONFIRMED');
- alerts=await run(w,'buildPositionAlerts({},[previous],[x])');assert.deepEqual(Array.from(alerts,a=>a.type),['BUY_READY']);
+ alerts=await run(w,'buildPositionAlerts({},[previous],[x])');assert.equal(alerts.length,0,'a better target on the same candle is not a second decision event');
 });
 
 test('Edge open + Android background: critical event is Worker-only and KV-deduplicated',async()=>{
@@ -63,7 +63,7 @@ test('Edge open + Android background: critical event is Worker-only and KV-dedup
 
 test('Finder keeps zero real entries honest while exposing hard-safe preparation candidates',()=>{
  const a=app(),x=fixture();x.p.mainTarget=103.5;x.p.marketRR=1.5;x.p.conditionalRR=2;x.p.bounce=false;
- a.x=x;assert.equal(a.finderEntryQuality(x).reason,'KÂR ALANI %5 / R/R ŞARTI SAĞLANMADI');
+ a.x=x;assert.equal(a.finderEntryQuality(x).reason,'');assert.equal(a.finderEntryQuality(x).band,'NORMAL');
  assert.equal(a.preparationCandidate(x).eligible,true);
  x.spread=.5;assert.equal(a.preparationCandidate(x).eligible,false,'unsafe spread never enters preparation list');
  assert.match(html,/HAZIRLIK \/ TAKİP LİSTESİ — ŞİMDİ AL SİNYALİ DEĞİL/);
@@ -72,7 +72,7 @@ test('Finder keeps zero real entries honest while exposing hard-safe preparation
 test('normal push: rejected/pullback/watch/wait states never leak auxiliary buy alerts',async()=>{
  const a=app(),w=edge();run(w,'alertAllowed=async()=>true');
  const buyingTypes=new Set(['BUY_READY','CONDITIONAL_READY','SUPPORT_NEAR','BUY_SCORE_UP','PROFIT_LEADER']);
- for(const change of [x=>x.p.mainTarget=101,x=>x.p.marketRR=x.p.conditionalRR=1.29,x=>x.p.recovery.confirmedSupportBreak=true,x=>x.spread=.5,x=>x.flow.distribution=true,x=>x.p.recovery.advanceFromDipPct=30,x=>x.p.recovery.history={},x=>x.p.recovery.fourHourFalling=true,x=>{x.p.near=true;x.p.bounce=false}]){
+ for(const change of [x=>x.p.mainTarget=99,x=>x.p.marketRR=x.p.conditionalRR=1.29,x=>x.p.recovery.confirmedSupportBreak=true,x=>x.spread=.5,x=>x.flow.distribution=true,x=>x.p.recovery.advanceFromDipPct=30,x=>x.p.recovery.history={},x=>x.p.recovery.fourHourFalling=true,x=>{x.p.near=true;x.p.bounce=false}]){
   const x=fixture();x.p.bounce=true;x.p.dist=.1;x.rpot={upside1:30,expectedEdge:20};change(x);
   const previous=fixture();previous.buy=4;previous.s.buy=4;previous.p.bounce=false;previous.p.dist=2;previous.p.mainTarget=110;
   const oldLeader=fixture();oldLeader.name='OTHER';oldLeader.rpot={upside1:40,expectedEdge:30};
@@ -88,6 +88,25 @@ test('normal push: rejected/pullback/watch/wait states never leak auxiliary buy 
 test('source syntax and V5.1 active labels',()=>{
   app();edge();new vm.Script(fs.readFileSync(new URL('OneSignalSDKWorker.js',root),'utf8'));new vm.Script(fs.readFileSync(new URL('sw.js',root),'utf8'));
   assert.match(html,/V5\.1 DENETİMLİ KARAR MOTORU/);assert.match(worker,/5\.1-QUOTE/);
+});
+test('VIC ghost is purged only by the active pair registry; a transient missing book quote is not a delist',()=>{
+ const a=app(),w=edge();
+ const tickers=[{symbol:'VIC_TRY',quoteVolume:125000},{symbol:'HEMI_TRY',quoteVolume:250000}],books=[{symbol:'HEMI_TRY',bidPrice:.7,askPrice:.701}];
+ for(const c of [a,w]){
+  assert.equal(c.validTryPairs(tickers,books).has('VIC'),true,'active VIC ticker survives a transient BID/ASK miss');
+  assert.equal(c.validTryPairs(tickers.filter(t=>!String(t.symbol).startsWith('VIC')),books).has('VIC'),false,'VIC is invalid once absent from the authoritative active ticker registry');
+ }
+});
+test('two coins share one WS; REST fallback, reconnect recovery and foreground resync stay wired',()=>{
+ const a=app();
+ run(a,`wsInstances=[];WebSocket=class{static OPEN=1;static CONNECTING=0;static CLOSED=3;constructor(url){this.url=url;this.readyState=0;wsInstances.push(this)}close(){this.readyState=3}};
+ activeCoinNames=()=>['AAA','BBB'];pairRegistry={checkedAt:Date.now(),valid:new Set(['AAA','BBB'])};restCalls=[];fetchPositionDepthSnapshot=async n=>{restCalls.push(n)};syncBinanceClock=()=>{};`);
+ a.startMarketWS();a.startMarketWS();
+ assert.equal(run(a,'wsInstances.length'),1,'duplicate start must not open a second socket');
+ assert.match(run(a,'wsInstances[0].url'),/aaatry@depth5/);assert.match(run(a,'wsInstances[0].url'),/bbbtry@depth5/);
+ run(a,'wsInstances[0].onerror()');assert.deepEqual(Array.from(run(a,'restCalls')),['AAA','BBB']);
+ run(a,'wsInstances[0].onclose()');assert.match(a.document.getElementById('liveTrack').textContent,/REST YEDEK.*YENİDEN BAĞLANIYOR/);
+ assert.match(html,/visibilitychange[\s\S]{0,180}startPositionQuoteStream\(\)/);
 });
 
 test('critical alerts use existing entry states, fresh data and entry-specific R/R',()=>{
@@ -216,7 +235,7 @@ test('year request and short-listing history: no fabricated full-year coverage',
  assert.equal((await w.klines('NIL','1d')).length,8);assert.match(run(w,'requested'),/limit=366/);
  assert.equal(a.recoveryHistory([candle(Date.UTC(2026,1,1))],[],[],rows,100).context.year.complete,false);
 });
-test('Finder excludes below-5% plans; returns zero to three without admitting hard failures',async()=>{
+test('Finder keeps sub-3% plans as quality warnings and returns zero only for hard failures',async()=>{
  const a=app();a.setTimeout=callback=>{queueMicrotask(callback);return 1};
  const candidates=['AAA','BBB','CCC','BAD'].map((name,i)=>{
   const x=fixture();x.name=name;x.qv=100000-i;x.m.ema9=100;x.m.ema21=99;x.m.macd=2;x.m.signal=1;x.m.vol=120;x.m.vma5=100;x.h.ema9=100;x.h.ema21=99;
@@ -230,7 +249,8 @@ test('Finder excludes below-5% plans; returns zero to three without admitting ha
  let winners=await a.findDaily3();assert.equal(winners.length,3);assert.ok(winners.every(x=>x.name!=='BAD'));assert.ok(winners.every(x=>x.scanState.key!=='CONFIRMED'));
  a.candidates=candidates.slice(0,2);winners=await a.findDaily3();assert.equal(winners.length,2);
  a.candidates=[candidates[0]];winners=await a.findDaily3();assert.equal(winners.length,1);assert.equal(winners[0].name,'AAA');
- candidates[0].p.mainTarget=101;winners=await a.findDaily3();assert.equal(winners.length,0);
+ candidates[0].p.mainTarget=101;winners=await a.findDaily3();assert.equal(winners.length,1);assert.equal(a.finderEntryQuality(winners[0]).band,'DÜŞÜK — KALİTE UYARISI');
+ candidates[0].p.marketRR=1.29;candidates[0].p.conditionalRR=1.29;winners=await a.findDaily3();assert.equal(winners.length,0);
  assert.match(a.document.getElementById('scanStatus').textContent,/ŞU ANDA UYGUN FIRSAT YOK/);
 });
 test('notification control shows progress, bounded checks; registration is not delivery evidence',async()=>{
@@ -258,7 +278,7 @@ test('NIL / MANTRA / TST historical candle replay: prefix-only parity and safety
     run(c,'m=calc(frames["15m"]);h=calc(frames["1h"]);flow=buildFlowContext(frames["15m"],{status:"VERİ YOK"},m);p=enrichRecoveryPlan(tradePlan(frames["15m"],frames["1h"],m,h),frames["15m"],frames["1h"],frames["4h"],frames["1d"],m,h,flow,.1);x={m,h,p,flow,spread:.1,s:score(m,h,p),buy:score(m,h,p).buy};');
     const state=run(c,c===a?'entryState(x).key':'candidateState(x)');
     if(state==='CONFIRMED'||state==='BUY'){assert.ok(c.p.bounce);assert.ok(c.p.marketRR>=1.3);}
-    if(state==='CONDITIONAL'){assert.ok(c.finderEntryQuality(c.x,'CONDITIONAL').profit>=5-1e-9);assert.ok(c.p.conditionalEntry<c.p.marketEntry);assert.ok(c.p.conditionalRR>=1.3);assert.equal(c.p.supportSource,'HORIZONTAL');}
+    if(state==='CONDITIONAL'){assert.ok(c.finderEntryQuality(c.x,'CONDITIONAL').profit>0);assert.ok(c.p.conditionalEntry<c.p.marketEntry);assert.ok(c.p.conditionalRR>=1.3);assert.equal(c.p.supportSource,'HORIZONTAL');}
     outputs.push({state,plan:c.p});
    }
    const map={CONFIRMED:'BUY',BROKEN:'REJECT',FLOW_RISK:'REJECT',FILTERED:'REJECT'};
@@ -272,26 +292,29 @@ test('NIL / MANTRA / TST historical candle replay: prefix-only parity and safety
   }
   assert.equal(checked,96,scenario.coin+' full day');
   assert.equal(lateSignals,0,'NIL late-entry protection');
-  // The former sub-5% acceptance is intentionally superseded by the August 31 gate.
-  if(first.CONDITIONAL)assert.ok(first.CONDITIONAL.conditionalProfit>=5-1e-9);
+  // Profit area is a quality/ranking reference; safety gates still remain mandatory.
+  if(first.CONDITIONAL)assert.ok(first.CONDITIONAL.conditionalProfit>0);
+  if(scenario.coin==='TST'){assert.ok(first.CONDITIONAL);assert.ok(first.CONDITIONAL.price>=.75&&first.CONDITIONAL.price<=.77,'TST must surface in the early reversal zone');}
+  if(scenario.coin==='MANTRA'){assert.ok(first.CONDITIONAL);assert.ok(first.CONDITIONAL.price>=.202&&first.CONDITIONAL.price<=.209,'MANTRA must surface before the late 0.223 area');}
 
   console.log('CANDLE REPLAY (assumed spread 0.1%, no historical book):',scenario.coin,JSON.stringify(first));
  }
 });
-test('August 31: shared entry quality, exact profit tiers, history ranking and HEMI-shaped chase rejection',()=>{
+test('shared entry quality, 3% reference tiers, history ranking and HEMI-shaped chase rejection',()=>{
  const a=app(),w=edge();assert.equal(String(a.finderEntryQuality),String(w.finderEntryQuality));assert.equal(String(a.compareFinderQuality),String(w.compareFinderQuality));
  for(const c of [a,w]){
-  for(const [profit,band,eligible] of [[4.99,'ELENDİ',false],[5,'NORMAL',true],[7.99,'NORMAL',true],[8,'GÜÇLÜ',true],[11.99,'GÜÇLÜ',true],[12,'ÇOK GÜÇLÜ',true]]){
+  for(const [profit,band,eligible] of [[2.99,'DÜŞÜK — KALİTE UYARISI',true],[3,'NORMAL',true],[7.99,'NORMAL',true],[8,'GÜÇLÜ',true],[11.99,'GÜÇLÜ',true],[12,'ÇOK GÜÇLÜ',true]]){
    const x=fixture();x.p.mainTarget=100*(1+profit/100);assert.equal(c.finderEntryQuality(x,'MARKET').band,band);assert.equal(c.finderEntryQuality(x,'MARKET').marketEligible,eligible);
   }
   const x=fixture();x.p.mainTarget=104.5;x.p.bounce=true;x.p.marketRR=3;x.p.conditionalRR=4;
-  assert.equal(c.finderEntryQuality(x,'MARKET').marketEligible,false);if(c===a)assert.notEqual(c.entryGuide(x.p,x.m,x.h).cls,'egGreen');assert.equal(c.finderEntryQuality(x,'CONDITIONAL').conditionalEligible,true);
-  c.x=x;assert.notEqual(run(c,c===a?'entryState(x).key':'candidateState(x)'),c===a?'CONFIRMED':'BUY');
+  assert.equal(c.finderEntryQuality(x,'MARKET').marketEligible,true);assert.equal(c.finderEntryQuality(x,'CONDITIONAL').conditionalEligible,true);
+  c.x=x;assert.equal(run(c,c===a?'entryState(x).key':'candidateState(x)'),c===a?'CONFIRMED':'BUY');
   x.p.supportSource='DYNAMIC';assert.equal(c.finderEntryQuality(x,'CONDITIONAL').conditionalEligible,false);
   const near=fixture(),far=fixture();far.p.recovery.history.week.low=90;far.candidate=100;near.candidate=44;assert.ok(c.compareFinderQuality(near,far)<0);
-  for(const change of [x=>x.p.recovery.recentAdvancePct=30,x=>x.p.recovery.multiDayAdvancePct=120,x=>x.p.recovery.history.week.low=40]){
+  for(const change of [x=>x.p.recovery.recentAdvancePct=30,x=>x.p.recovery.multiDayAdvancePct=120]){
    const x=fixture();x.p.dist=.1;x.p.support=99.9;x.p.marketRR=20;x.p.conditionalRR=30;change(x);assert.ok(c.finderEntryQuality(x).reason);
   }
+  const historicFar=fixture();historicFar.p.recovery.history.week.low=40;assert.equal(c.finderEntryQuality(historicFar).reason,'');assert.ok(c.finderEntryQuality(historicFar).historicalScore<c.finderEntryQuality(fixture()).historicalScore,'older lows affect ranking, not a standalone hard gate');
   const missing=fixture();missing.p.recovery.history={};assert.equal(c.finderEntryQuality(missing).reason,'TARİHSEL VERİ EKSİK');
  }
 });
