@@ -93,6 +93,7 @@ const COIN_APP_BASE = "/Coin-analiz/";
 const COIN_OS_WORKER_PATH = "/Coin-analiz/OneSignalSDKWorker.js";
 const COIN_WORKER_API = "https://coin-analiz.fatihhanfan.workers.dev";
 const BINANCE_TR_WSS = "wss://stream-cloud.binance.tr";
+const COIN_WORKER_WSS = COIN_WORKER_API.replace(/^http/,'ws');
 
 window.CoinOneSignal = null;
 window.CoinOneSignalInitError = null;
@@ -1497,7 +1498,7 @@ function scheduleFourHourScan(){
  const delay=Math.max(1500,turkeyFourHourBoundary(Date.now(),true)-Date.now());
  fourHourTimer=setTimeout(runFourHourScan,delay);
 }
-let marketWS=null,wsRetryTimer=null,wsConnectTimer=null,latestAnalysis={};const conditionalRecheckAt={};
+let marketWS=null,wsRetryTimer=null,wsConnectTimer=null,wsUseWorkerBridge=false,latestAnalysis={};const conditionalRecheckAt={};
 function activeCoinNames(){return [...new Set([...loadWatch(),...positionCoinNames(),currentManualCoin].filter(Boolean))]}
 function refreshEntryQuoteDom(name){
  const q=liveQuotes[name],fresh=quoteIsFresh(name),d=latestAnalysis[name];
@@ -1555,14 +1556,16 @@ function startMarketWS(){
  if(marketWS&&(marketWS.readyState===WebSocket.OPEN||marketWS.readyState===WebSocket.CONNECTING)&&marketWS.__coinSig===sig)return;
  stopMarketWS();
  const streams=[];for(const n of names){const sym=(n+'TRY').toLowerCase();streams.push(sym+'@miniTicker',sym+'@depth5@100ms',sym+'@kline_15m',sym+'@kline_1h')}
- const url=BINANCE_TR_WSS+'/stream?streams='+streams.join('/');
+ const url=wsUseWorkerBridge
+  ?COIN_WORKER_WSS+'/market-stream?coins='+encodeURIComponent(names.join(','))
+  :BINANCE_TR_WSS+'/stream?streams='+streams.join('/');
  try{marketWS=new WebSocket(url);marketWS.__coinSig=sig}catch(e){$('liveTrack').textContent='REST YEDEK';for(const n of names)fetchPositionDepthSnapshot(n);wsRetryTimer=setTimeout(startMarketWS,2500);return}
  const socket=marketWS;
  $('liveTrack').textContent='BAĞLANIYOR';
- wsConnectTimer=setTimeout(()=>{if(marketWS!==socket||socket.readyState!==WebSocket.CONNECTING)return;$('liveTrack').textContent='REST YEDEK • WS YENİDEN BAĞLANIYOR';for(const n of names)fetchPositionDepthSnapshot(n);try{socket.close()}catch{marketWS=null;wsRetryTimer=setTimeout(startMarketWS,2500)}},7000);
- marketWS.onopen=()=>{if(wsConnectTimer)clearTimeout(wsConnectTimer);wsConnectTimer=null;$('liveTrack').textContent='CANLI • ORTAK WS';syncBinanceClock();for(const n of names)fetchPositionDepthSnapshot(n)};
+ wsConnectTimer=setTimeout(()=>{if(marketWS!==socket||socket.readyState!==WebSocket.CONNECTING)return;wsUseWorkerBridge=true;$('liveTrack').textContent='REST YEDEK • WORKER WS BAĞLANIYOR';for(const n of names)fetchPositionDepthSnapshot(n);try{socket.close()}catch{marketWS=null;wsRetryTimer=setTimeout(startMarketWS,2500)}},7000);
+ marketWS.onopen=()=>{if(wsConnectTimer)clearTimeout(wsConnectTimer);wsConnectTimer=null;$('liveTrack').textContent=wsUseWorkerBridge?'CANLI • WORKER WS':'CANLI • ORTAK WS';syncBinanceClock();for(const n of names)fetchPositionDepthSnapshot(n)};
  marketWS.onmessage=ev=>{try{const w=JSON.parse(ev.data),d=w.data||w,stream=String(w.stream||'');const sym=d.s||stream.split('@')[0];const name=wsSymbolToBase(sym);
-   $('liveTrack').textContent='CANLI • ORTAK WS';
+   $('liveTrack').textContent=wsUseWorkerBridge?'CANLI • WORKER WS':'CANLI • ORTAK WS';
    if(d.e==='24hrMiniTicker')updateLiveDom(name,{price:+d.c});
    else if(Array.isArray(d.bids)&&Array.isArray(d.asks))updateLiveDom(name,{bid:+d.bids?.[0]?.[0],ask:+d.asks?.[0]?.[0]});
     else if(d.e==='kline'&&d.k){updateLiveDom(name,{price:+d.k.c});if(d.k.x){const iv=d.k.i;if(iv==='15m'||iv==='1h'){const boundary=Number(d.k.T||Date.now())+1;setTimeout(()=>{run({auto:true,hourly:iv==='1h',boundary});if(name===currentManualCoin)recheckManualCoin();},1800)}}}

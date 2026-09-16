@@ -75,6 +75,12 @@ export default {
         });
       }
 
+      if (url.pathname === '/market-stream' && request.method === 'GET') {
+        const names=normalizeNames(String(url.searchParams.get('coins')||'').split(',')).slice(0,TRACK_COUNT);
+        if(!names.length||names.some(name=>EXCLUDED_BASES.has(name)))return json({ok:false,error:'Geçersiz coin listesi'},400);
+        return openMarketStreamBridge(names);
+      }
+
       if (url.pathname === '/quote' && request.method === 'GET') {
         const name=String(url.searchParams.get('coin')||'');
         if(!/^[A-Z0-9]{2,20}$/.test(name)||EXCLUDED_BASES.has(name))return json({ok:false,error:'Geçersiz coin'},400);
@@ -616,6 +622,22 @@ async function fetchBinanceTrBookTicker(name, timeoutMs = 10000) {
   } finally {
     try { socket.close(1000, 'done'); } catch {}
   }
+}
+
+async function openMarketStreamBridge(names) {
+  const streams=[];
+  for(const name of names){const sym=(cleanBase(name)+'try').toLowerCase();streams.push(sym+'@miniTicker',sym+'@depth5@100ms',sym+'@kline_15m',sym+'@kline_1h');}
+  const upstreamResponse=await fetch('https://stream-cloud.binance.tr/stream?streams='+streams.join('/'),{headers:{Upgrade:'websocket'}});
+  const upstream=upstreamResponse.webSocket;
+  if(!upstream)return json({ok:false,error:`Binance TR WebSocket bağlantısı reddedildi (HTTP ${upstreamResponse.status})`},502);
+  const pair=new WebSocketPair(),client=pair[0],server=pair[1];
+  server.accept();upstream.accept();
+  upstream.addEventListener('message',event=>{try{server.send(event.data)}catch{}});
+  upstream.addEventListener('close',event=>{try{server.close(event.code||1011,event.reason||'upstream closed')}catch{}});
+  upstream.addEventListener('error',()=>{try{server.close(1011,'upstream error')}catch{}});
+  server.addEventListener('close',()=>{try{upstream.close(1000,'client closed')}catch{}});
+  server.addEventListener('error',()=>{try{upstream.close(1011,'client error')}catch{}});
+  return new Response(null,{status:101,webSocket:client});
 }
 
 async function applyScheduledSummaries(env, state, scheduleMeta = {}) {
