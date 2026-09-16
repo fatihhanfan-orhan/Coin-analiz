@@ -1498,7 +1498,7 @@ function scheduleFourHourScan(){
  const delay=Math.max(1500,turkeyFourHourBoundary(Date.now(),true)-Date.now());
  fourHourTimer=setTimeout(runFourHourScan,delay);
 }
-let marketWS=null,wsRetryTimer=null,wsConnectTimer=null,wsUseWorkerBridge=false,latestAnalysis={};const conditionalRecheckAt={};
+let marketWS=null,wsRetryTimer=null,wsConnectTimer=null,wsBridgePollTimer=null,wsUseWorkerBridge=false,latestAnalysis={};const conditionalRecheckAt={};
 function activeCoinNames(){return [...new Set([...loadWatch(),...positionCoinNames(),currentManualCoin].filter(Boolean))]}
 function refreshEntryQuoteDom(name){
  const q=liveQuotes[name],fresh=quoteIsFresh(name),d=latestAnalysis[name];
@@ -1550,7 +1550,7 @@ function updateLiveDom(name,patch={}){
   refreshEntryQuoteDom(name);
   if($('liveChecked'))$('liveChecked').textContent=new Date().toLocaleTimeString('tr-TR');
 }
-function stopMarketWS(){if(wsRetryTimer)clearTimeout(wsRetryTimer);wsRetryTimer=null;if(wsConnectTimer)clearTimeout(wsConnectTimer);wsConnectTimer=null;if(marketWS){try{marketWS.onclose=null;marketWS.close()}catch{} marketWS=null}}
+function stopMarketWS(){if(wsRetryTimer)clearTimeout(wsRetryTimer);wsRetryTimer=null;if(wsConnectTimer)clearTimeout(wsConnectTimer);wsConnectTimer=null;if(wsBridgePollTimer)clearInterval(wsBridgePollTimer);wsBridgePollTimer=null;if(marketWS){try{marketWS.onclose=null;marketWS.close()}catch{} marketWS=null}}
 function startMarketWS(){
  const names=activeCoinNames().filter(n=>pairRegistry.valid.has(n)),sig=names.slice().sort().join(',');if(!names.length){stopMarketWS();return}
  if(marketWS&&(marketWS.readyState===WebSocket.OPEN||marketWS.readyState===WebSocket.CONNECTING)&&marketWS.__coinSig===sig)return;
@@ -1563,15 +1563,15 @@ function startMarketWS(){
  const socket=marketWS;
  $('liveTrack').textContent='BAĞLANIYOR';
  wsConnectTimer=setTimeout(()=>{if(marketWS!==socket||socket.readyState!==WebSocket.CONNECTING)return;wsUseWorkerBridge=true;$('liveTrack').textContent='REST YEDEK • WORKER WS BAĞLANIYOR';for(const n of names)fetchPositionDepthSnapshot(n);try{socket.close()}catch{marketWS=null;wsRetryTimer=setTimeout(startMarketWS,2500)}},7000);
- marketWS.onopen=()=>{if(wsConnectTimer)clearTimeout(wsConnectTimer);wsConnectTimer=null;$('liveTrack').textContent=wsUseWorkerBridge?'CANLI • WORKER WS':'CANLI • ORTAK WS';syncBinanceClock();for(const n of names)fetchPositionDepthSnapshot(n)};
+ marketWS.onopen=()=>{if(wsConnectTimer)clearTimeout(wsConnectTimer);wsConnectTimer=null;$('liveTrack').textContent=wsUseWorkerBridge?'CANLI • WORKER WS YEDEK':'CANLI • ORTAK WS';if(wsUseWorkerBridge){marketWS.send('poll');wsBridgePollTimer=setInterval(()=>{if(marketWS?.readyState===WebSocket.OPEN)marketWS.send('poll')},2500)}syncBinanceClock();for(const n of names)fetchPositionDepthSnapshot(n)};
  marketWS.onmessage=ev=>{try{const w=JSON.parse(ev.data),d=w.data||w,stream=String(w.stream||'');const sym=d.s||stream.split('@')[0];const name=wsSymbolToBase(sym);
-   $('liveTrack').textContent=wsUseWorkerBridge?'CANLI • WORKER WS':'CANLI • ORTAK WS';
+   $('liveTrack').textContent=wsUseWorkerBridge?'CANLI • WORKER WS YEDEK':'CANLI • ORTAK WS';
    if(d.e==='24hrMiniTicker')updateLiveDom(name,{price:+d.c});
    else if(Array.isArray(d.bids)&&Array.isArray(d.asks))updateLiveDom(name,{bid:+d.bids?.[0]?.[0],ask:+d.asks?.[0]?.[0]});
     else if(d.e==='kline'&&d.k){updateLiveDom(name,{price:+d.k.c});if(d.k.x){const iv=d.k.i;if(iv==='15m'||iv==='1h'){const boundary=Number(d.k.T||Date.now())+1;setTimeout(()=>{run({auto:true,hourly:iv==='1h',boundary});if(name===currentManualCoin)recheckManualCoin();},1800)}}}
  }catch(e){}};
  marketWS.onerror=()=>{$('liveTrack').textContent='REST YEDEK';for(const n of names)fetchPositionDepthSnapshot(n);try{marketWS?.close()}catch{}};
- marketWS.onclose=()=>{if(wsConnectTimer)clearTimeout(wsConnectTimer);wsConnectTimer=null;marketWS=null;$('liveTrack').textContent='REST YEDEK • WS YENİDEN BAĞLANIYOR';for(const n of names){refreshEntryQuoteDom(n);fetchPositionDepthSnapshot(n)};wsRetryTimer=setTimeout(startMarketWS,2500)};
+ marketWS.onclose=()=>{if(wsConnectTimer)clearTimeout(wsConnectTimer);wsConnectTimer=null;if(wsBridgePollTimer)clearInterval(wsBridgePollTimer);wsBridgePollTimer=null;marketWS=null;$('liveTrack').textContent='REST YEDEK • WS YENİDEN BAĞLANIYOR';for(const n of names){refreshEntryQuoteDom(n);fetchPositionDepthSnapshot(n)};wsRetryTimer=setTimeout(startMarketWS,2500)};
 }
 async function liveRefresh(){return;}
 function startLiveTracking(){startMarketWS();}

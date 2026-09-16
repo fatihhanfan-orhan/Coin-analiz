@@ -629,14 +629,24 @@ async function openMarketStreamBridge(names) {
   for(const name of names){const sym=(cleanBase(name)+'try').toLowerCase();streams.push(sym+'@miniTicker',sym+'@depth5@100ms',sym+'@kline_15m',sym+'@kline_1h');}
   const upstreamResponse=await fetch('https://stream-cloud.binance.tr/stream?streams='+streams.join('/'),{headers:{Upgrade:'websocket'}});
   const upstream=upstreamResponse.webSocket;
-  if(!upstream)return json({ok:false,error:`Binance TR WebSocket bağlantısı reddedildi (HTTP ${upstreamResponse.status})`},502);
   const pair=new WebSocketPair(),client=pair[0],server=pair[1];
-  server.accept();upstream.accept();
-  upstream.addEventListener('message',event=>{try{server.send(event.data)}catch{}});
-  upstream.addEventListener('close',event=>{try{server.close(event.code||1011,event.reason||'upstream closed')}catch{}});
-  upstream.addEventListener('error',()=>{try{server.close(1011,'upstream error')}catch{}});
-  server.addEventListener('close',()=>{try{upstream.close(1000,'client closed')}catch{}});
-  server.addEventListener('error',()=>{try{upstream.close(1011,'client error')}catch{}});
+  server.accept();
+  if(upstream){
+    upstream.accept();
+    upstream.addEventListener('message',event=>{try{server.send(event.data)}catch{}});
+    upstream.addEventListener('close',event=>{try{server.close(event.code||1011,event.reason||'upstream closed')}catch{}});
+    upstream.addEventListener('error',()=>{try{server.close(1011,'upstream error')}catch{}});
+    server.addEventListener('close',()=>{try{upstream.close(1000,'client closed')}catch{}});
+    server.addEventListener('error',()=>{try{upstream.close(1011,'client error')}catch{}});
+  }else{
+    server.addEventListener('message',async event=>{
+      if(String(event.data)!=='poll')return;
+      try{
+        const rows=await allBookTickers(),map=new Map(rows.map(row=>[baseFromSymbol(String(row.symbol||row.s||'')),row]));
+        for(const name of names){const row=map.get(name),bid=num(row,'bidPrice','b'),ask=num(row,'askPrice','a');if(bid>0&&ask>=bid)server.send(JSON.stringify({stream:name.toLowerCase()+'try@depth5@100ms',data:{s:name+'TRY',bids:[[String(bid),'0']],asks:[[String(ask),'0']],source:'BINANCE_TR_REST_BRIDGE'}}));}
+      }catch(error){try{server.send(JSON.stringify({error:String(error?.message||error)}))}catch{}}
+    });
+  }
   return new Response(null,{status:101,webSocket:client});
 }
 

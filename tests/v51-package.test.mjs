@@ -106,7 +106,7 @@ test('two coins share one WS; REST fallback, reconnect recovery and foreground r
  assert.match(run(a,'wsInstances[0].url'),/aaatry@depth5/);assert.match(run(a,'wsInstances[0].url'),/bbbtry@depth5/);
  run(a,'timers[0]()');assert.deepEqual(Array.from(run(a,'restCalls')),['AAA','BBB']);assert.match(a.document.getElementById('liveTrack').textContent,/REST YEDEK.*WORKER WS BAĞLANIYOR/);
  run(a,'wsInstances[0].onclose()');assert.match(a.document.getElementById('liveTrack').textContent,/REST YEDEK.*YENİDEN BAĞLANIYOR/);
- run(a,'timers[timers.length-1]()');assert.equal(run(a,'wsInstances.length'),2);assert.match(run(a,'wsInstances[1].url'),/coin-analiz\.fatihhanfan\.workers\.dev\/market-stream/);run(a,'wsInstances[1].readyState=WebSocket.OPEN;wsInstances[1].onopen();wsInstances[1].onmessage({data:JSON.stringify({stream:"aaatry@depth5@100ms",data:{s:"AAATRY",bids:[["99","1"]],asks:[["100","1"]]}})})');assert.equal(a.document.getElementById('liveTrack').textContent,'CANLI • WORKER WS');
+ run(a,'setInterval=fn=>{timers.push(fn);return timers.length};clearInterval=()=>{};timers[timers.length-1]()');assert.equal(run(a,'wsInstances.length'),2);assert.match(run(a,'wsInstances[1].url'),/coin-analiz\.fatihhanfan\.workers\.dev\/market-stream/);run(a,'wsInstances[1].send=x=>{wsInstances[1].sent=x};wsInstances[1].readyState=WebSocket.OPEN;wsInstances[1].onopen();wsInstances[1].onmessage({data:JSON.stringify({stream:"aaatry@depth5@100ms",data:{s:"AAATRY",bids:[["99","1"]],asks:[["100","1"]]}})})');assert.equal(run(a,'wsInstances[1].sent'),'poll');assert.equal(a.document.getElementById('liveTrack').textContent,'CANLI • WORKER WS YEDEK');
  assert.match(html,/visibilitychange[\s\S]{0,180}startPositionQuoteStream\(\)/);
 });
 
@@ -115,6 +115,7 @@ test('Worker exposes a bounded Binance TR WebSocket bridge',()=>{
  assert.match(worker,/normalizeNames\([\s\S]{0,160}slice\(0,TRACK_COUNT\)/);
  assert.match(worker,/new WebSocketPair\(\)/);
  assert.match(worker,/status:101,webSocket:client/);
+ assert.match(worker,/BINANCE_TR_REST_BRIDGE/);
 });
 
 test('critical alerts use existing entry states, fresh data and entry-specific R/R',()=>{
