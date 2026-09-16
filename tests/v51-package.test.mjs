@@ -163,12 +163,14 @@ test('Worker quote route rejects invalid symbols, disables cache and reports rea
   w.req=new Request('https://worker/quote?coin=../../bad');assert.equal((await run(w,'handler.fetch(req,{}, {})')).status,400);
 });
 
-test('baseline indicators, market score and bounce formula are preserved',()=>{
+test('baseline indicators and market score are preserved; bounce uses two-of-three delayed confirmation groups',()=>{
  const args=['-c',`safe.directory=${decodeURIComponent(root.pathname).replace(/^\//,'').replace(/\/$/,'')}`,'show'];
  const before=app(execFileSync('git',[...args,'HEAD:index.html'],{cwd:root,encoding:'utf8'})),after=app();
  const normalize=fn=>String(fn).replace(/\s+/g,'');
  for(const name of ['calc','score'])assert.equal(normalize(after[name]),normalize(before[name]),name);
- assert.equal(normalize(String(after.tradePlan).match(/const volOk=[\s\S]*?const bounce=.*?;/)[0]),normalize(String(before.tradePlan).match(/const volOk=[\s\S]*?const bounce=.*?;/)[0]));
+ const worker=edge(),bounceBlock=String(after.tradePlan).match(/const volOk=[\s\S]*?const bounce=.*?;/)[0];
+ assert.equal(normalize(bounceBlock),normalize(String(worker.tradePlan).match(/const volOk=[\s\S]*?const bounce=.*?;/)[0]));
+ assert.match(bounceBlock,/delayedConfirmations>=2/);
  const rows=Array.from({length:220},(_,i)=>candle(Date.UTC(2026,7,27)+i*900000,100+Math.sin(i/5)*3+i*.01));
  for(let n=140;n<220;n++){
   for(const c of [before,after]){c.rows=rows.slice(0,n);run(c,'m=calc(rows);h=calc(rows)');}
@@ -326,6 +328,7 @@ test('shared entry quality, 3% reference tiers, history ranking and HEMI-shaped 
   c.x=x;assert.equal(run(c,c===a?'entryState(x).key':'candidateState(x)'),c===a?'CONFIRMED':'BUY');
   x.p.supportSource='DYNAMIC';assert.equal(c.finderEntryQuality(x,'CONDITIONAL').conditionalEligible,false);
   const near=fixture(),far=fixture();far.p.recovery.history.week.low=90;far.candidate=100;near.candidate=44;assert.ok(c.compareFinderQuality(near,far)<0);
+  const deeper=fixture(),shallow=fixture();for(const x of [deeper,shallow])x.p.recovery.history={day:{complete:true,low:98,high:106},week:{complete:true,low:98,high:110},month:{complete:true,low:98,high:120},quarter:{complete:true,low:98,high:125}};deeper.ch=-5;deeper.p.recovery.drops={d3:-9,d5:-13,d7:-18};shallow.ch=-1;shallow.p.recovery.drops={d3:-2,d5:-3,d7:-4};assert.ok(c.finderEntryQuality(deeper).declineScore>c.finderEntryQuality(shallow).declineScore);assert.ok(c.compareFinderQuality(deeper,shallow)<0);
   for(const change of [x=>x.p.recovery.recentAdvancePct=30,x=>x.p.recovery.multiDayAdvancePct=120]){
    const x=fixture();x.p.dist=.1;x.p.support=99.9;x.p.marketRR=20;x.p.conditionalRR=30;change(x);assert.ok(c.finderEntryQuality(x).reason);
   }

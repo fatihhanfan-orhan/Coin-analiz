@@ -955,18 +955,21 @@ function finderEntryQuality(x,kind='AUTO'){
  const marketProfit=area(market),conditionalProfit=area(limit);
  const marketEligible=marketProfit>0&&Number(p.marketRR)>=1.30&&stop>0&&stop<market;
  const conditionalEligible=p.supportSource==='HORIZONTAL'&&limit>stop&&limit<market&&conditionalProfit>0&&Number(p.conditionalRR)>=1.30;
- const periods=['week','month','quarter','year'].map(k=>history[k]).filter(v=>(v?.complete||Number(v?.bars)>=7)&&Number(v.low)>0);
- const historicDistance=periods.length?Math.max(...periods.map(v=>Math.max(0,(market/Number(v.low)-1)*100))):Infinity;
- const historicalScore=periods.length?periods.reduce((sum,v)=>sum+Math.max(0,1-Math.max(0,(market/Number(v.low)-1)*100)/12),0)/periods.length*30:0;
+ const windows=[['day',.15,6],['week',.25,12],['month',.30,20],['quarter',.20,30],['year',.10,50]].map(([key,weight,range])=>({key,weight,range,value:history[key]})).filter(v=>(v.value?.complete||Number(v.value?.bars)>=7)&&Number(v.value.low)>0);
+ const weightTotal=windows.reduce((sum,v)=>sum+v.weight,0),historicDistance=weightTotal?windows.reduce((sum,v)=>sum+Math.max(0,(market/Number(v.value.low)-1)*100)*v.weight,0)/weightTotal:Infinity;
+ const historicalScore=weightTotal?windows.reduce((sum,v)=>sum+Math.max(0,1-Math.max(0,(market/Number(v.value.low)-1)*100)/v.range)*v.weight,0)/weightTotal*30:0;
+ const monthHigh=Number(history.month?.high),monthDrawdown=monthHigh>market?(1-market/monthHigh)*100:0,drops=rec.drops||{},declines=[Math.max(0,-Number(x?.ch||0)),Math.max(0,-Number(drops.d3||0)),Math.max(0,-Number(drops.d5||0)),Math.max(0,-Number(drops.d7||0)),monthDrawdown];
+ const declineScore=declines[0]*.10+declines[1]*.20+declines[2]*.20+declines[3]*.20+declines[4]*.30;
+ const reversalScore=[rec.higherLow,rec.base,rec.reclaim,rec.fourHourHold].filter(Boolean).length+(rec.state==='TOPARLANMA TEYİDİ'?2:0)-(rec.newLow?2:0)-(rec.fourHourFalling?3:0);
  const selectedKind=kind==='AUTO'?(marketEligible&&p.bounce&&Number(x.s?.buy??x.buy)>=7?'MARKET':conditionalEligible?'CONDITIONAL':'MARKET'):kind;
  const profit=selectedKind==='MARKET'?marketProfit:selectedKind==='CONDITIONAL'?conditionalProfit:NaN;
  const eligible=kind==='MARKET'?marketEligible:kind==='CONDITIONAL'?conditionalEligible:marketEligible||conditionalEligible;
  const reason=risk.pullback?'GEÇ GİRİŞ / PULLBACK BEKLE':!history.week?.complete?'TARİHSEL VERİ EKSİK':!eligible?'HEDEF / R/R ŞARTI SAĞLANMADI':'';
- return{selectedKind,rr:Number(selectedKind==='MARKET'?p.marketRR:p.conditionalRR),reason,marketEligible,conditionalEligible,marketProfit,conditionalProfit,profit,historicalScore,historicDistance,band:profit>=12?'ÇOK GÜÇLÜ':profit>=8?'GÜÇLÜ':profit>=3-1e-9?'NORMAL':'DÜŞÜK — KALİTE UYARISI'};
+ return{selectedKind,rr:Number(selectedKind==='MARKET'?p.marketRR:p.conditionalRR),reason,marketEligible,conditionalEligible,marketProfit,conditionalProfit,profit,historicalScore,historicDistance,declineScore,reversalScore,band:profit>=12?'ÇOK GÜÇLÜ':profit>=8?'GÜÇLÜ':profit>=3-1e-9?'NORMAL':'DÜŞÜK — KALİTE UYARISI'};
 }
 function compareFinderQuality(a,b){
  const qa=finderEntryQuality(a),qb=finderEntryQuality(b);
- return qb.historicalScore-qa.historicalScore||qa.historicDistance-qb.historicDistance||Number(a.p?.recovery?.advanceFromDipPct||0)-Number(b.p?.recovery?.advanceFromDipPct||0)||Math.abs(Number(a.p?.dist)||0)-Math.abs(Number(b.p?.dist)||0)||qb.profit-qa.profit||qb.rr-qa.rr||Number(b.candidate||0)-Number(a.candidate||0);
+ return qb.historicalScore-qa.historicalScore||qb.declineScore-qa.declineScore||qa.historicDistance-qb.historicDistance||Math.abs(Number(a.p?.dist)||0)-Math.abs(Number(b.p?.dist)||0)||qb.reversalScore-qa.reversalScore||Number(a.p?.recovery?.advanceFromDipPct||0)-Number(b.p?.recovery?.advanceFromDipPct||0)||qb.profit-qa.profit||qb.rr-qa.rr||Number(b.candidate||0)-Number(a.candidate||0);
 }
 function finderRiskFlags(x){const p=x?.p||{},m=x?.m||{},h=x?.h||{},rec=p.recovery||{},f=x?.flow||{},drops=rec.drops||{},severeDrop=Number(drops.d3)<=-8||Number(drops.d5)<=-12||Number(drops.d7)<=-18,weakRecovery=severeDrop&&f.status==='REAL'&&Number(f.h1?.net)<0&&rec.state!=='TOPARLANMA TEYİDİ',fast15=Number(m.lastOpen)>0&&((Number(m.price)/Number(m.lastOpen)-1)*100)>=2.5,fast1h=Number(h.lastOpen)>0&&((Number(m.price)/Number(h.lastOpen)-1)*100)>=4,overheat=Number(m.rsi6)>=82||Number(m.rsi12)>=72||Number(m.rsi)>75,momentumHot=Number(m.rsi6)>=70||Number(m.rsi12)>=65||Number(m.rsi)>=68,entryGap=Number(p.marketEntry)>0&&Number(p.conditionalEntry)>0?(Number(p.marketEntry)/Number(p.conditionalEntry)-1)*100:0,anchorAdvance=Number(rec.advanceFromDipPct),multiDayAdvance=Number(rec.multiDayAdvancePct),recentAdvance=Number(rec.recentAdvancePct),advancedLate=recentAdvance>=12||multiDayAdvance>=18||anchorAdvance>=12||(anchorAdvance>=8&&(fast15||fast1h||momentumHot||entryGap>2.5))||(multiDayAdvance>=18&&(fast15||fast1h||momentumHot||entryGap>2.5)),chased=overheat||fast15||entryGap>2.5||advancedLate;return{severeDrop,weakRecovery,fast15,fast1h,overheat,momentumHot,entryGap,anchorAdvance,multiDayAdvance,recentAdvance,advancedLate,chased,pullback:weakRecovery||chased};}
 function candidateState(x){if(hardGateReason(x))return ['TARİHSEL DİPTEN UZAK','GEÇ GİRİŞ / PULLBACK BEKLE'].includes(hardGateReason(x))&&finderRiskFlags(x).pullback?'PULLBACK':'REJECT';const p=x.p||{},m=x.m||{},rec=p.recovery||{},hold=!rec.confirmedSupportBreak&&!rec.fourHourFalling&&(rec.higherLow||rec.base||rec.reclaim||Number(p.dist)<0),momentum=[m.hist>m.prevHist,m.kdjK>m.kdjD,m.price>m.lastOpen,m.rsi6>=m.rsi12].filter(Boolean).length,flow=x.flow||{},flowOk=flow.status!=='REAL'||flow.m15?.net>0||!flow.distribution;if(finderRiskFlags(x).pullback)return 'PULLBACK';if(finderEntryQuality(x).marketEligible&&p.bounce&&hold&&flowOk&&Number(p.marketRR)>=1.30&&Number(x.buy)>=7)return 'BUY';if(finderEntryQuality(x).marketEligible&&p.near&&Number(p.conditionalEntry)>=Number(p.zoneLow)&&Number(p.conditionalEntry)<=Number(p.zoneHigh)&&!p.bounce&&hold&&flowOk)return 'LIMIT_WAIT';if(finderEntryQuality(x).conditionalEligible&&Number(p.conditionalEntry)>Number(p.stop)&&Number(p.conditionalEntry)<Number(p.marketEntry)&&Number(p.conditionalRR)>=1.30&&hold&&flowOk&&momentum>=2)return 'CONDITIONAL';if(finderEntryQuality(x).marketEligible&&(p.near||Number(p.dist)<=2)&&hold&&flowOk&&momentum>=2)return 'EARLY';return 'WATCH';}
@@ -1147,7 +1150,8 @@ function tradePlan(k15,k1h,m,h){
   const emaOk=m.ema9>=m.ema21 && m.price>=m.ema9;
   const macdOk=m.macd>=m.signal && m.hist>m.prevHist;
   const hourlyOk=h.ema9>=h.ema21 || h.hist>h.prevHist;
-  const bounce=near && volOk && rsiOk && (emaOk||macdOk) && hourlyOk;
+  const delayedConfirmations=(rsiOk?1:0)+((emaOk||macdOk)?1:0)+(hourlyOk?1:0);
+  const bounce=near && volOk && delayedConfirmations>=2;
 
   const stop=Math.max(0,zoneLow-Math.max(A*.65,support*.0035));
   const horizontalHighs=[...highs15,...highs1].filter(Number.isFinite).sort((a,b)=>a-b);
@@ -1160,7 +1164,7 @@ function tradePlan(k15,k1h,m,h){
   const entry=near?price:(zoneLow+zoneHigh)/2;
   const risk=Math.max(entry-stop,entry*.001), rr=Number.isFinite(t1)?(t1-entry)/risk:NaN;
   const status=bounce?'TEYİTLİ GİRİŞ':(near?'BEKLE — DESTEK TEYİDİ BEKLENİYOR':dist>3.5?'GEÇ KALINDI':dist>0?'BEKLE — DESTEĞE GERİ ÇEKİLME':'ALMA — DESTEK KAPANIŞLA GEÇERSİZ');
-  return{support,supportSource:horizontalSupports.length?'HORIZONTAL':'DYNAMIC',zoneLow,zoneHigh,dist,near,bounce,volOk,rsiOk,emaOk,macdOk,hourlyOk,stop,t1,t2,crossedResistance,entry,rr,hasResistance,status,atr:A};
+  return{support,supportSource:horizontalSupports.length?'HORIZONTAL':'DYNAMIC',zoneLow,zoneHigh,dist,near,bounce,volOk,rsiOk,emaOk,macdOk,hourlyOk,delayedConfirmations,stop,t1,t2,crossedResistance,entry,rr,hasResistance,status,atr:A};
 }
 
 function score(m,h,p){
