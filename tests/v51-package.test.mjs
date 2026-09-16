@@ -105,9 +105,15 @@ test('two coins share one WS; REST fallback, reconnect recovery and foreground r
  assert.equal(run(a,'wsInstances.length'),1,'duplicate start must not open a second socket');
  assert.match(run(a,'wsInstances[0].url'),/aaatry@depth5/);assert.match(run(a,'wsInstances[0].url'),/bbbtry@depth5/);
  run(a,'timers[0]()');assert.deepEqual(Array.from(run(a,'restCalls')),['AAA','BBB']);assert.match(a.document.getElementById('liveTrack').textContent,/REST YEDEK.*WORKER WS BAĞLANIYOR/);
- run(a,'wsInstances[0].onclose()');assert.match(a.document.getElementById('liveTrack').textContent,/REST YEDEK.*YENİDEN BAĞLANIYOR/);
+ run(a,'wsInstances[0].onclose()');assert.match(a.document.getElementById('liveTrack').textContent,/REST YEDEK.*WORKER WS BAĞLANIYOR/);
  run(a,'setInterval=fn=>{timers.push(fn);return timers.length};clearInterval=()=>{};timers[timers.length-1]()');assert.equal(run(a,'wsInstances.length'),2);assert.match(run(a,'wsInstances[1].url'),/coin-analiz\.fatihhanfan\.workers\.dev\/market-stream/);run(a,'wsInstances[1].send=x=>{wsInstances[1].sent=x};wsInstances[1].readyState=WebSocket.OPEN;wsInstances[1].onopen();wsInstances[1].onmessage({data:JSON.stringify({stream:"aaatry@depth5@100ms",data:{s:"AAATRY",bids:[["99","1"]],asks:[["100","1"]]}})})');assert.equal(run(a,'wsInstances[1].sent'),'poll');assert.equal(a.document.getElementById('liveTrack').textContent,'CANLI • WORKER WS YEDEK');
  assert.match(html,/visibilitychange[\s\S]{0,180}startPositionQuoteStream\(\)/);
+});
+
+test('failed Worker bridge settles on REST and retries only after a five minute cooldown',()=>{
+ const a=app();
+ run(a,`wsInstances=[];timers=[];setTimeout=(fn,ms)=>{timers.push({fn,ms});return timers.length};clearTimeout=()=>{};clearInterval=()=>{};WebSocket=class{static OPEN=1;static CONNECTING=0;static CLOSED=3;constructor(url){this.url=url;this.readyState=0;wsInstances.push(this)}close(){this.readyState=3}};activeCoinNames=()=>['AAA'];pairRegistry={checkedAt:Date.now(),valid:new Set(['AAA'])};fetchPositionDepthSnapshot=async()=>{};syncBinanceClock=()=>{};wsUseWorkerBridge=true;`);
+ a.startMarketWS();run(a,'wsInstances[0].onclose()');assert.equal(a.document.getElementById('liveTrack').textContent,'CANLI • REST YEDEK');assert.ok(run(a,'timers.at(-1).ms')>=299000);assert.ok(run(a,'wsRetryAt>Date.now()'));
 });
 
 test('Worker exposes a bounded Binance TR WebSocket bridge',()=>{
