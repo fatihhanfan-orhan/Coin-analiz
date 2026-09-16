@@ -78,7 +78,7 @@ export default {
       if (url.pathname === '/market-stream' && request.method === 'GET') {
         const names=normalizeNames(String(url.searchParams.get('coins')||'').split(',')).slice(0,TRACK_COUNT);
         if(!names.length||names.some(name=>EXCLUDED_BASES.has(name)))return json({ok:false,error:'Geçersiz coin listesi'},400);
-        return openMarketStreamBridge(names);
+        return openRestPollingBridge(names);
       }
 
       if (url.pathname === '/quote' && request.method === 'GET') {
@@ -624,7 +624,8 @@ async function fetchBinanceTrBookTicker(name, timeoutMs = 10000) {
   }
 }
 
-async function openMarketStreamBridge(names) {
+// Browser'a WebSocket taşıması sunar; Binance TR kaynağı REST bookTicker polling'dir.
+async function openRestPollingBridge(names) {
   const pair=new WebSocketPair(),client=pair[0],server=pair[1];
   server.accept();
   server.addEventListener('message',async event=>{
@@ -1186,7 +1187,6 @@ function score(m,h,p){
   if(p && p.status.includes('DESTEK ALTI'))b=Math.min(b,4.9);
   if(p && !p.bounce)b=Math.min(b,7.4);
   if(p && !p.hasResistance)b=Math.min(b,6.9);
-  if(upside<3)b=Math.min(b,6.8);
   return{buy:b,sell:Math.round(Math.min(10,sell)*10)/10,upside:Math.round(upside*100)/100,profitPts:Math.round(profitPts*10)/10};
 }
 

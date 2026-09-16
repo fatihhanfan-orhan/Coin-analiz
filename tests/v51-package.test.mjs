@@ -69,6 +69,20 @@ test('Finder keeps zero real entries honest while exposing hard-safe preparation
  assert.match(html,/HAZIRLIK \/ TAKİP LİSTESİ — ŞİMDİ AL SİNYALİ DEĞİL/);
 });
 
+test('sub-3% profit remains a quality penalty, never an indirect market-entry hard gate',()=>{
+ const a=app(),w=edge(),x=fixture();
+ Object.assign(x.m,{vol:2,vma5:1,vma10:.9,ema9:99,ema21:98,macd:2,signal:1,rsi:50});
+ Object.assign(x.h,{ema9:99,ema21:98});
+ Object.assign(x.p,{marketEntry:100,conditionalEntry:99,stop:98.5,mainTarget:102,marketRR:1.33,conditionalRR:2,dist:.1,near:true,bounce:true,hasResistance:true});
+ x.s=a.score(x.m,x.h,x.p);x.buy=x.s.buy;
+ assert.ok(a.finderEntryQuality(x,'MARKET').profit>=1&&a.finderEntryQuality(x,'MARKET').profit<3);
+ assert.ok(x.s.buy>=7,'low profit keeps its proportional score penalty without a 6.8 cap');
+ assert.equal(a.entryState(x).key,'CONFIRMED');
+ w.x=structuredClone(x);assert.equal(run(w,'candidateState(x)'),'BUY');
+ assert.doesNotMatch(html,/if\(upside<3\)b=Math\.min\(b,6\.8\)/);
+ assert.doesNotMatch(worker,/if\(upside<3\)b=Math\.min\(b,6\.8\)/);
+});
+
 test('normal push: rejected/pullback/watch/wait states never leak auxiliary buy alerts',async()=>{
  const a=app(),w=edge();run(w,'alertAllowed=async()=>true');
  const buyingTypes=new Set(['BUY_READY','CONDITIONAL_READY','SUPPORT_NEAR','BUY_SCORE_UP','PROFIT_LEADER']);
@@ -87,7 +101,7 @@ test('normal push: rejected/pullback/watch/wait states never leak auxiliary buy 
 
 test('source syntax and V5.1 active labels',()=>{
   app();edge();new vm.Script(fs.readFileSync(new URL('OneSignalSDKWorker.js',root),'utf8'));new vm.Script(fs.readFileSync(new URL('sw.js',root),'utf8'));
-  assert.match(html,/V5\.1 DENETİMLİ KARAR MOTORU/);assert.match(worker,/5\.1-QUOTE/);
+  assert.match(html,/V5\.1 DENETİMLİ KARAR MOTORU/);assert.match(html,/ADAY KALİTE PUANI/);assert.match(worker,/5\.1-QUOTE/);
 });
 test('VIC ghost is purged only by the active pair registry; a transient missing book quote is not a delist',()=>{
  const a=app(),w=edge();
@@ -105,20 +119,22 @@ test('two coins share one WS; REST fallback, reconnect recovery and foreground r
  assert.equal(run(a,'wsInstances.length'),1,'duplicate start must not open a second socket');
  assert.match(run(a,'wsInstances[0].url'),/aaatry@depth5/);assert.match(run(a,'wsInstances[0].url'),/bbbtry@depth5/);
  run(a,'timers[0]()');assert.deepEqual(Array.from(run(a,'restCalls')),['AAA','BBB']);assert.match(a.document.getElementById('liveTrack').textContent,/REST YEDEK.*WORKER WS BAĞLANIYOR/);
- run(a,'wsInstances[0].onclose()');assert.match(a.document.getElementById('liveTrack').textContent,/REST YEDEK.*WORKER WS BAĞLANIYOR/);
- run(a,'setInterval=fn=>{timers.push(fn);return timers.length};clearInterval=()=>{};timers[timers.length-1]()');assert.equal(run(a,'wsInstances.length'),2);assert.match(run(a,'wsInstances[1].url'),/coin-analiz\.fatihhanfan\.workers\.dev\/market-stream/);run(a,'wsInstances[1].send=x=>{wsInstances[1].sent=x};wsInstances[1].readyState=WebSocket.OPEN;wsInstances[1].onopen();wsInstances[1].onmessage({data:JSON.stringify({stream:"aaatry@depth5@100ms",data:{s:"AAATRY",bids:[["99","1"]],asks:[["100","1"]]}})})');assert.equal(run(a,'wsInstances[1].sent'),'poll');assert.equal(a.document.getElementById('liveTrack').textContent,'CANLI • WORKER WS YEDEK');
+ run(a,'wsInstances[0].onclose()');assert.match(a.document.getElementById('liveTrack').textContent,/REST YEDEK.*WORKER KÖPRÜSÜ BAĞLANIYOR/);
+ run(a,'setInterval=fn=>{timers.push(fn);return timers.length};clearInterval=()=>{};timers[timers.length-1]()');assert.equal(run(a,'wsInstances.length'),2);assert.match(run(a,'wsInstances[1].url'),/coin-analiz\.fatihhanfan\.workers\.dev\/market-stream/);run(a,'wsInstances[1].send=x=>{wsInstances[1].sent=x};wsInstances[1].readyState=WebSocket.OPEN;wsInstances[1].onopen();wsInstances[1].onmessage({data:JSON.stringify({stream:"aaatry@depth5@100ms",data:{s:"AAATRY",bids:[["99","1"]],asks:[["100","1"]]}})})');assert.equal(run(a,'wsInstances[1].sent'),'poll');assert.equal(a.document.getElementById('liveTrack').textContent,'CANLI • WORKER REST KÖPRÜSÜ');
  assert.match(html,/visibilitychange[\s\S]{0,180}startPositionQuoteStream\(\)/);
 });
 
-test('failed Worker bridge settles on REST and retries only after a five minute cooldown',()=>{
+test('Worker bridge uses backoff before first open and five minute cooldown only after a real open',()=>{
  const a=app();
  run(a,`wsInstances=[];timers=[];setTimeout=(fn,ms)=>{timers.push({fn,ms});return timers.length};clearTimeout=()=>{};clearInterval=()=>{};WebSocket=class{static OPEN=1;static CONNECTING=0;static CLOSED=3;constructor(url){this.url=url;this.readyState=0;wsInstances.push(this)}close(){this.readyState=3}};activeCoinNames=()=>['AAA'];pairRegistry={checkedAt:Date.now(),valid:new Set(['AAA'])};fetchPositionDepthSnapshot=async()=>{};syncBinanceClock=()=>{};wsUseWorkerBridge=true;`);
- a.startMarketWS();run(a,'wsInstances[0].onclose()');assert.equal(a.document.getElementById('liveTrack').textContent,'CANLI • REST YEDEK');assert.ok(run(a,'timers.at(-1).ms')>=299000);assert.ok(run(a,'wsRetryAt>Date.now()'));
+ a.startMarketWS();run(a,'wsInstances[0].onclose()');assert.match(a.document.getElementById('liveTrack').textContent,/REST YEDEK.*YENİDEN DENENECEK/);assert.ok(run(a,'timers.at(-1).ms')>=5000&&run(a,'timers.at(-1).ms')<=60000);assert.equal(run(a,'wsRetryAt>Date.now()'),false);
+ run(a,'wsInstances=[];timers=[];wsUseWorkerBridge=true;wsBridgeFailCount=0');a.startMarketWS();run(a,'wsInstances[0].readyState=WebSocket.OPEN;wsInstances[0].send=()=>{};wsInstances[0].onopen();wsInstances[0].onclose()');assert.equal(a.document.getElementById('liveTrack').textContent,'CANLI • REST YEDEK');assert.ok(run(a,'timers.at(-1).ms')>=299000);assert.ok(run(a,'wsRetryAt>Date.now()'));
 });
 
 test('Worker exposes a bounded Binance TR WebSocket bridge',()=>{
  assert.match(worker,/url\.pathname === '\/market-stream'/);
  assert.match(worker,/normalizeNames\([\s\S]{0,160}slice\(0,TRACK_COUNT\)/);
+ assert.match(worker,/openRestPollingBridge/);
  assert.match(worker,/new WebSocketPair\(\)/);
  assert.match(worker,/status:101,webSocket:client/);
  assert.match(worker,/BINANCE_TR_REST_BRIDGE/);
@@ -167,7 +183,9 @@ test('baseline indicators and market score are preserved; bounce uses two-of-thr
  const args=['-c',`safe.directory=${decodeURIComponent(root.pathname).replace(/^\//,'').replace(/\/$/,'')}`,'show'];
  const before=app(execFileSync('git',[...args,'HEAD:index.html'],{cwd:root,encoding:'utf8'})),after=app();
  const normalize=fn=>String(fn).replace(/\s+/g,'');
- for(const name of ['calc','score'])assert.equal(normalize(after[name]),normalize(before[name]),name);
+ assert.equal(normalize(after.calc),normalize(before.calc),'calc');
+ const oldProfitCap=/if\(upside<3\)b=Math\.min\(b,6\.8\);\/\/anaday-tradekâralanıyoksagüçlüALverme/;
+ assert.equal(normalize(after.score),normalize(before.score).replace(oldProfitCap,''),'score differs only by the removed sub-3% cap');
  const worker=edge(),bounceBlock=String(after.tradePlan).match(/const volOk=[\s\S]*?const bounce=.*?;/)[0];
  assert.equal(normalize(bounceBlock),normalize(String(worker.tradePlan).match(/const volOk=[\s\S]*?const bounce=.*?;/)[0]));
  assert.match(bounceBlock,/delayedConfirmations>=2/);

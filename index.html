@@ -83,6 +83,7 @@
 @media(max-width:370px){.posMetrics,.flowGrid{grid-template-columns:1fr}.price{font-size:28px}.decision{font-size:23px}.sectionTitle,.manualTitle,.positionTitle{font-size:18px}}
 .refTrigger{display:inline-flex;width:auto;align-items:center;gap:4px;margin:0;padding:0;border:0;border-radius:0;background:transparent;color:inherit;font:inherit;font-weight:inherit;text-align:left;cursor:pointer}.refTrigger .infoIcon{display:inline-grid;place-items:center;width:18px;height:18px;border:1px solid #6d91b7;border-radius:50%;color:#bcd8f5;font-size:12px;line-height:1}.refSheetBackdrop{position:fixed;inset:0;z-index:9998;background:#0009;display:flex;align-items:flex-end;justify-content:center;padding:10px}.refSheet{width:min(520px,100%);max-height:min(72vh,560px);overflow:auto;background:#101d2e;border:2px solid #4c739b;border-radius:20px 20px 14px 14px;padding:18px;box-shadow:0 20px 70px #000}.refSheet h3{margin:0 40px 12px 0;font-size:22px}.refSheetRow{margin:7px 0;font-size:16px}.refSheetRow b{color:#a9bdd3}.refSheetStatus{padding:9px 11px;border-radius:10px;font-size:17px;font-weight:950;background:#17263a}.refSheetText{margin:12px 0 4px;color:#d2dceb;font-size:15px;line-height:1.5}.refClose{position:absolute;right:18px;top:14px;width:38px;height:38px;padding:0;border-radius:50%;background:#334155;font-size:20px}.refSheetWrap{position:relative}@media(min-width:700px){.refSheetBackdrop{align-items:center}.refSheet{border-radius:20px}}
 
+.cand .cp::before{content:"ADAY KALİTE PUANI ";display:block;font-size:9px;line-height:1.2;color:#93a4b9;font-weight:800}
 </style>
 
 <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
@@ -384,7 +385,6 @@ function score(m,h,p){
  if(p && String(p.status||'').includes('DESTEK ALTI'))b=Math.min(b,4.9);
  if(p && !p.bounce)b=Math.min(b,7.4);
  if(p && !p.hasResistance)b=Math.min(b,6.9);
- if(upside<3)b=Math.min(b,6.8); // ana day-trade kâr alanı yoksa güçlü AL verme
  return{buy:b,sell:Math.round(Math.min(10,sell)*10)/10,upside:Math.round(upside*100)/100,profitPts:Math.round(profitPts*10)/10};
 }
 function cls(v){return v>=7.5?'good':v>=5?'mid':'bad'}
@@ -992,7 +992,6 @@ function scoreBuy10(d,news){
   const rsi=Number(m.rsi||0);
   score += Math.min(1,(rsi>=45&&rsi<=65?.4:.15)+(Number(m.macd)>Number(m.signal)?.35:0)+(Number(m.hist)>Number(m.prevHist)?.25:0));
   score += news?.score>=1?0.5:news?.score>0?0.3:news?.score<=-2?0:0.15;
-  if(upside<3) score=Math.min(score,6.9);
   if(news?.score<=-2 && news?.trust>=75) score=Math.min(score,5.5);
   if(rr>0 && rr<1.5) score=Math.min(score,6.5);
   score=clamp(score,0,10);
@@ -1502,7 +1501,7 @@ function scheduleFourHourScan(){
  const delay=Math.max(1500,turkeyFourHourBoundary(Date.now(),true)-Date.now());
  fourHourTimer=setTimeout(runFourHourScan,delay);
 }
-let marketWS=null,wsRetryTimer=null,wsConnectTimer=null,wsBridgePollTimer=null,wsUseWorkerBridge=false,wsRetryAt=0,latestAnalysis={};const conditionalRecheckAt={};
+let marketWS=null,wsRetryTimer=null,wsConnectTimer=null,wsBridgePollTimer=null,wsUseWorkerBridge=false,wsBridgeFailCount=0,wsRetryAt=0,latestAnalysis={};const conditionalRecheckAt={};
 function activeCoinNames(){return [...new Set([...loadWatch(),...positionCoinNames(),currentManualCoin].filter(Boolean))]}
 function refreshEntryQuoteDom(name){
  const q=liveQuotes[name],fresh=quoteIsFresh(name),d=latestAnalysis[name];
@@ -1566,18 +1565,18 @@ function startMarketWS(){
   :BINANCE_TR_WSS+'/stream?streams='+streams.join('/');
  try{marketWS=new WebSocket(url);marketWS.__coinSig=sig}catch(e){$('liveTrack').textContent='REST YEDEK';for(const n of names)fetchPositionDepthSnapshot(n);wsRetryTimer=setTimeout(startMarketWS,2500);return}
  const socket=marketWS;
- socket.__workerBridge=wsUseWorkerBridge;
+ socket.__workerBridge=wsUseWorkerBridge;socket.__opened=false;
  $('liveTrack').textContent='BAĞLANIYOR';
  wsConnectTimer=setTimeout(()=>{if(marketWS!==socket||socket.readyState!==WebSocket.CONNECTING)return;wsUseWorkerBridge=true;$('liveTrack').textContent='REST YEDEK • WORKER WS BAĞLANIYOR';for(const n of names)fetchPositionDepthSnapshot(n);try{socket.close()}catch{marketWS=null;wsRetryTimer=setTimeout(startMarketWS,2500)}},7000);
- marketWS.onopen=()=>{if(wsConnectTimer)clearTimeout(wsConnectTimer);wsConnectTimer=null;wsRetryAt=0;$('liveTrack').textContent=wsUseWorkerBridge?'CANLI • WORKER WS YEDEK':'CANLI • ORTAK WS';if(wsUseWorkerBridge){marketWS.send('poll');wsBridgePollTimer=setInterval(()=>{if(marketWS?.readyState===WebSocket.OPEN)marketWS.send('poll')},2500)}syncBinanceClock();for(const n of names)fetchPositionDepthSnapshot(n)};
+ marketWS.onopen=()=>{socket.__opened=true;wsBridgeFailCount=0;if(wsConnectTimer)clearTimeout(wsConnectTimer);wsConnectTimer=null;wsRetryAt=0;$('liveTrack').textContent=wsUseWorkerBridge?'CANLI • WORKER REST KÖPRÜSÜ':'CANLI • ORTAK WS';if(wsUseWorkerBridge){marketWS.send('poll');wsBridgePollTimer=setInterval(()=>{if(marketWS?.readyState===WebSocket.OPEN)marketWS.send('poll')},2500)}syncBinanceClock();for(const n of names)fetchPositionDepthSnapshot(n)};
  marketWS.onmessage=ev=>{try{const w=JSON.parse(ev.data),d=w.data||w,stream=String(w.stream||'');const sym=d.s||stream.split('@')[0];const name=wsSymbolToBase(sym);
-   $('liveTrack').textContent=wsUseWorkerBridge?'CANLI • WORKER WS YEDEK':'CANLI • ORTAK WS';
+   $('liveTrack').textContent=wsUseWorkerBridge?'CANLI • WORKER REST KÖPRÜSÜ':'CANLI • ORTAK WS';
    if(d.e==='24hrMiniTicker')updateLiveDom(name,{price:+d.c});
    else if(Array.isArray(d.bids)&&Array.isArray(d.asks))updateLiveDom(name,{bid:+d.bids?.[0]?.[0],ask:+d.asks?.[0]?.[0]});
     else if(d.e==='kline'&&d.k){updateLiveDom(name,{price:+d.k.c});if(d.k.x){const iv=d.k.i;if(iv==='15m'||iv==='1h'){const boundary=Number(d.k.T||Date.now())+1;setTimeout(()=>{run({auto:true,hourly:iv==='1h',boundary});if(name===currentManualCoin)recheckManualCoin();},1800)}}}
  }catch(e){}};
  marketWS.onerror=()=>{$('liveTrack').textContent='REST YEDEK';for(const n of names)fetchPositionDepthSnapshot(n);try{marketWS?.close()}catch{}};
- marketWS.onclose=()=>{if(wsConnectTimer)clearTimeout(wsConnectTimer);wsConnectTimer=null;if(wsBridgePollTimer)clearInterval(wsBridgePollTimer);wsBridgePollTimer=null;marketWS=null;for(const n of names){refreshEntryQuoteDom(n);fetchPositionDepthSnapshot(n)};if(socket.__workerBridge){wsRetryAt=Date.now()+5*60e3;wsUseWorkerBridge=false;$('liveTrack').textContent='CANLI • REST YEDEK';wsRetryTimer=setTimeout(()=>{wsRetryTimer=null;wsRetryAt=0;startMarketWS()},5*60e3)}else{$('liveTrack').textContent='REST YEDEK • WORKER WS BAĞLANIYOR';wsRetryTimer=setTimeout(startMarketWS,2500)}};
+ marketWS.onclose=()=>{if(wsConnectTimer)clearTimeout(wsConnectTimer);wsConnectTimer=null;if(wsBridgePollTimer)clearInterval(wsBridgePollTimer);wsBridgePollTimer=null;marketWS=null;for(const n of names){refreshEntryQuoteDom(n);fetchPositionDepthSnapshot(n)};if(socket.__workerBridge&&socket.__opened){wsRetryAt=Date.now()+5*60e3;wsUseWorkerBridge=false;$('liveTrack').textContent='CANLI • REST YEDEK';wsRetryTimer=setTimeout(()=>{wsRetryTimer=null;wsRetryAt=0;startMarketWS()},5*60e3)}else if(socket.__workerBridge){wsBridgeFailCount+=1;const delay=Math.min(60000,5000*Math.pow(2,wsBridgeFailCount-1));wsUseWorkerBridge=true;$('liveTrack').textContent='CANLI • REST YEDEK • WORKER KÖPRÜSÜ YENİDEN DENENECEK';wsRetryTimer=setTimeout(()=>{wsRetryTimer=null;startMarketWS()},delay)}else{$('liveTrack').textContent='REST YEDEK • WORKER KÖPRÜSÜ BAĞLANIYOR';wsRetryTimer=setTimeout(startMarketWS,2500)}};
 }
 async function liveRefresh(){return;}
 function startLiveTracking(){startMarketWS();}
