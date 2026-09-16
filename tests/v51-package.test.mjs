@@ -366,7 +366,7 @@ test('NIL / MANTRA / TST historical candle replay: prefix-only parity and safety
  }
 });
 test('shared entry quality, 3% reference tiers, history ranking and HEMI-shaped chase rejection',()=>{
- const a=app(),w=edge();assert.equal(String(a.finderEntryQuality),String(w.finderEntryQuality));assert.equal(String(a.compareFinderQuality),String(w.compareFinderQuality));
+ const a=app(),w=edge();assert.equal(String(a.finderEntryQuality),String(w.finderEntryQuality));assert.equal(String(a.finderRankingScore),String(w.finderRankingScore));assert.equal(String(a.compareFinderQuality),String(w.compareFinderQuality));
  for(const c of [a,w]){
   for(const [profit,band,eligible] of [[2.99,'DÜŞÜK — KALİTE UYARISI',true],[3,'NORMAL',true],[7.99,'NORMAL',true],[8,'GÜÇLÜ',true],[11.99,'GÜÇLÜ',true],[12,'ÇOK GÜÇLÜ',true]]){
    const x=fixture();x.p.mainTarget=100*(1+profit/100);assert.equal(c.finderEntryQuality(x,'MARKET').band,band);assert.equal(c.finderEntryQuality(x,'MARKET').marketEligible,eligible);
@@ -383,6 +383,17 @@ test('shared entry quality, 3% reference tiers, history ranking and HEMI-shaped 
   const historicFar=fixture();historicFar.p.recovery.history.week.low=40;assert.equal(c.finderEntryQuality(historicFar).reason,'');assert.ok(c.finderEntryQuality(historicFar).historicalScore<c.finderEntryQuality(fixture()).historicalScore,'older lows affect ranking, not a standalone hard gate');
   const missing=fixture();missing.p.recovery.history={};assert.equal(c.finderEntryQuality(missing).reason,'TARİHSEL VERİ EKSİK');
  }
+});
+test('ACE/HEMI production-shaped ranking balances profit, R/R, entry, volume, flow and history',()=>{
+ const a=app(),w=edge(),make=(name,{candidate,profit,rr,volume,dist,flows,drops,historyLow,recovery})=>{
+  const x=fixture();x.name=name;x.candidate=candidate;x.vRatio=volume;x.ch=drops.d1;x.buy=name==='HEMI'?5.2:4.2;
+  Object.assign(x.p,{marketEntry:100,conditionalEntry:100,mainTarget:100*(1+profit/100),stop:100-(profit/rr),marketRR:rr,conditionalRR:rr,dist,near:true,bounce:false,supportSource:'DYNAMIC'});
+  Object.assign(x.p.recovery,{state:recovery,drops:{d3:drops.d3,d5:drops.d5,d7:drops.d7},higherLow:name==='HEMI',base:true,reclaim:name==='HEMI',fourHourHold:name==='HEMI',history:{day:{complete:true,low:historyLow,high:105},week:{complete:true,low:historyLow,high:110},month:{complete:true,low:historyLow,high:120},quarter:{complete:true,low:historyLow,high:125}}});
+  x.flow={status:'REAL',m15:{net:flows[0]},m30:{net:flows[1]},h1:{net:flows[2]},distribution:false};return x;
+ };
+ const ace=make('ACE',{candidate:11,profit:.54,rr:1.75,volume:1.03,dist:-.18,flows:[-522858,-1074691,-1750587],drops:{d1:0,d3:-1.54,d5:-6.01,d7:-14.21},historyLow:99,recovery:'YATAY / İZLE'});
+ const hemi=make('HEMI',{candidate:33,profit:2.03,rr:2.90,volume:2.15,dist:-.01,flows:[159796,126275,663472],drops:{d1:0,d3:-.13,d5:-9.86,d7:-17.28},historyLow:92,recovery:'DESTEK GERİ KAZANIMI / İZLE'});
+ for(const c of [a,w]){c.ace=structuredClone(ace);c.hemi=structuredClone(hemi);assert.ok(c.finderEntryQuality(c.ace).historicalScore>c.finderEntryQuality(c.hemi).historicalScore);assert.ok(c.finderRankingScore(c.hemi)>c.finderRankingScore(c.ace));assert.equal([c.ace,c.hemi].sort(c.compareFinderQuality)[0].name,'HEMI');}
 });
 test('real HEMI August 31 prefix replay: weekly rise is not erased by a small pullback',()=>{
  const scenario=JSON.parse(fs.readFileSync(new URL('tests/fixtures/hemi-history.json',root),'utf8')),a=app(),w=edge();

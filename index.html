@@ -226,9 +226,16 @@ function finderEntryQuality(x,kind='AUTO'){
  const reason=risk.pullback?'GEÇ GİRİŞ / PULLBACK BEKLE':!history.week?.complete?'TARİHSEL VERİ EKSİK':!eligible?'HEDEF / R/R ŞARTI SAĞLANMADI':'';
  return{selectedKind,rr:Number(selectedKind==='MARKET'?p.marketRR:p.conditionalRR),reason,marketEligible,conditionalEligible,marketProfit,conditionalProfit,profit,historicalScore,historicDistance,declineScore,reversalScore,band:profit>=12?'ÇOK GÜÇLÜ':profit>=8?'GÜÇLÜ':profit>=3-1e-9?'NORMAL':'DÜŞÜK — KALİTE UYARISI'};
 }
+function finderRankingScore(x){
+ const q=finderEntryQuality(x),p=x?.p||{},f=x?.flow||{},clamp=(v,a,b)=>Math.max(a,Math.min(b,Number.isFinite(Number(v))?Number(v):a));
+ const profit=clamp(q.profit,0,12)/12*22,rr=(clamp(q.rr,1.3,4)-1.3)/2.7*16,dist=Math.abs(Number(p.dist)||0),entry=Math.max(0,1-dist/3)*12+(p.bounce?4:p.near?2:0),reversal=clamp(q.reversalScore,0,6)/6*12,volume=(clamp(x?.vRatio,.75,2.5)-.75)/1.75*10;
+ const nets=[f.m15?.net,f.m30?.net,f.h1?.net].map(Number).filter(Number.isFinite),flow=nets.length?(nets.filter(v=>v>0).length/nets.length*8+(!f.distribution&&Number(f.h1?.net)>0?2:0)):4;
+ const history=clamp(q.historicalScore,0,30)/30*7+clamp(q.declineScore,0,20)/20*4,candidate=clamp(x?.candidate,0,100)/100*3;
+ return profit+rr+entry+reversal+volume+flow+history+candidate;
+}
 function compareFinderQuality(a,b){
  const qa=finderEntryQuality(a),qb=finderEntryQuality(b);
- return qb.historicalScore-qa.historicalScore||qb.declineScore-qa.declineScore||qa.historicDistance-qb.historicDistance||Math.abs(Number(a.p?.dist)||0)-Math.abs(Number(b.p?.dist)||0)||qb.reversalScore-qa.reversalScore||Number(a.p?.recovery?.advanceFromDipPct||0)-Number(b.p?.recovery?.advanceFromDipPct||0)||qb.profit-qa.profit||qb.rr-qa.rr||Number(b.candidate||0)-Number(a.candidate||0);
+ return finderRankingScore(b)-finderRankingScore(a)||qb.profit-qa.profit||qb.rr-qa.rr||Number(b.candidate||0)-Number(a.candidate||0);
 }
 function preparationCandidate(x){
  const p=x?.p||{},flow=moneyFlowModel(x),market=Number(p.marketEntry||x?.m?.price),limit=Number(p.conditionalEntry),stop=Number(p.stop),target=Number(p.mainTarget||p.t2||p.t1),marketRR=Number(p.marketRR),conditionalRR=Number(p.conditionalRR);
