@@ -99,13 +99,14 @@ test('VIC ghost is purged only by the active pair registry; a transient missing 
 });
 test('two coins share one WS; REST fallback, reconnect recovery and foreground resync stay wired',()=>{
  const a=app();
- run(a,`wsInstances=[];WebSocket=class{static OPEN=1;static CONNECTING=0;static CLOSED=3;constructor(url){this.url=url;this.readyState=0;wsInstances.push(this)}close(){this.readyState=3}};
+ run(a,`wsInstances=[];timers=[];setTimeout=fn=>{timers.push(fn);return timers.length};WebSocket=class{static OPEN=1;static CONNECTING=0;static CLOSED=3;constructor(url){this.url=url;this.readyState=0;wsInstances.push(this)}close(){this.readyState=3}};
  activeCoinNames=()=>['AAA','BBB'];pairRegistry={checkedAt:Date.now(),valid:new Set(['AAA','BBB'])};restCalls=[];fetchPositionDepthSnapshot=async n=>{restCalls.push(n)};syncBinanceClock=()=>{};`);
  a.startMarketWS();a.startMarketWS();
  assert.equal(run(a,'wsInstances.length'),1,'duplicate start must not open a second socket');
  assert.match(run(a,'wsInstances[0].url'),/aaatry@depth5/);assert.match(run(a,'wsInstances[0].url'),/bbbtry@depth5/);
- run(a,'wsInstances[0].onerror()');assert.deepEqual(Array.from(run(a,'restCalls')),['AAA','BBB']);
+ run(a,'timers[0]()');assert.deepEqual(Array.from(run(a,'restCalls')),['AAA','BBB']);assert.match(a.document.getElementById('liveTrack').textContent,/REST YEDEK.*YENİDEN BAĞLANIYOR/);
  run(a,'wsInstances[0].onclose()');assert.match(a.document.getElementById('liveTrack').textContent,/REST YEDEK.*YENİDEN BAĞLANIYOR/);
+ run(a,'timers[timers.length-1]()');assert.equal(run(a,'wsInstances.length'),2);run(a,'wsInstances[1].readyState=WebSocket.OPEN;wsInstances[1].onopen();wsInstances[1].onmessage({data:JSON.stringify({stream:"aaatry@depth5@100ms",data:{s:"AAATRY",bids:[["99","1"]],asks:[["100","1"]]}})})');assert.equal(a.document.getElementById('liveTrack').textContent,'CANLI • ORTAK WS');
  assert.match(html,/visibilitychange[\s\S]{0,180}startPositionQuoteStream\(\)/);
 });
 
