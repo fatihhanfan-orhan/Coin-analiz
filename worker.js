@@ -1,4 +1,4 @@
-import { CriticalAlarm } from './critical-alarm.mjs';
+import { CriticalAlarm, ALARM_RECIPIENTS } from './critical-alarm.mjs';
 // Coin Analiz V5.1 Worker — hızlı pozisyon alarmı + 15dk/1saat arka plan push
 // Analiz, giriş ve çıkış kararlarının tamamı aynı borsanın (Binance TR) TRY piyasasını kullanır.
 const BINANCE_24H_URLS = [
@@ -208,18 +208,46 @@ export default {
     // Tek dakikalık zamanlayıcı: her çalışmada önce Binance TR WebSocket BID ile pozisyon riski kontrol edilir.
     // Cloudflare çıkışındaki Binance REST WAF engeline karşı ağır analiz tarayıcıda yapılır ve Worker'a senkronlanır.
     const quarterHourly = minute % 15 === 0;
+    const finderDue = minute % 15 === 1;
     const fourHourly = minute === 1 && turkeyHour % 4 === 3;
-    ctx.waitUntil(runFastPositionCycle(env, t.toISOString(), {
-      quarterHourly,
-      hourly: quarterHourly && minute === 0,
-      fourHourly
-    }));
-    if(env.CRITICAL_ALARM_ENABLED==='true' && env.OPPORTUNITY_ALARMS)ctx.waitUntil((async()=>{
-      const state=await loadState(env);
-      await evaluateCriticalCandidates(env,normalizeNames([...(state.marketTop3||[]),...(state.tracked||[])].map(x=>x.name)).slice(0,3));
+    ctx.waitUntil((async()=>{
+      await runFastPositionCycle(env, t.toISOString(), {
+        quarterHourly,
+        hourly: quarterHourly && minute === 0,
+        fourHourly:false
+      });
+      if(finderDue)await runScheduledFinder(env,t);
+      if(env.CRITICAL_ALARM_ENABLED==='true' && env.OPPORTUNITY_ALARMS){
+        const state=await loadState(env);
+        await evaluateCriticalCandidates(env,normalizeNames([...(state.marketTop3||[]),...(state.tracked||[])].map(x=>x.name)).slice(0,3));
+      }
     })());
   }
 };
+
+async function acquireScheduledScanLock(env, window) {
+  if(!env.OPPORTUNITY_ALARMS)return {acquired:false,reason:'LOCK_UNAVAILABLE'};
+  const stub=env.OPPORTUNITY_ALARMS.get(env.OPPORTUNITY_ALARMS.idFromName('__server_finder__'));
+  const result=await (await stub.fetch('https://lock/scan-lock',{method:'POST',body:JSON.stringify({window})})).json();
+  return {...result,release:async()=>{if(result.acquired)await stub.fetch('https://lock/scan-unlock',{method:'POST',body:JSON.stringify({token:result.token})});}};
+}
+
+async function runScheduledFinder(env, scheduledDate) {
+  const scheduledAt=scheduledDate instanceof Date?scheduledDate:new Date(scheduledDate||Date.now());
+  const candleWindow=String(Math.floor((scheduledAt.getTime()-60_000)/900_000)*900_000);
+  const lock=await acquireScheduledScanLock(env,candleWindow);
+  if(!lock.acquired)return {ok:true,skipped:true,reason:lock.reason||'DUPLICATE_SCAN'};
+  try{
+    const state=await loadState(env);
+    if(String(state.lastServerScanWindow||'')===candleWindow)return {ok:true,skipped:true,reason:'WINDOW_ALREADY_SCANNED'};
+    const result=await backgroundCycle(env,{forceFullScan:true,serverFinder:true,collectAlerts:true,quarterHourly:true,notify:false,source:'scheduled-finder',scheduledAt:scheduledAt.toISOString()});
+    const latest=await loadState(env);latest.lastServerScanWindow=candleWindow;latest.lastServerScanStatus='PASS';latest.lastServerScanError=null;latest.updatedAt=new Date().toISOString();await saveState(env,latest);
+    return result;
+  }catch(error){
+    const latest=await loadState(env);latest.lastServerScanStatus='SCAN DATA ERROR';latest.lastServerScanError=String(error?.message||error);latest.updatedAt=new Date().toISOString();await saveState(env,latest);
+    return {ok:false,error:'SCAN DATA ERROR',detail:String(error?.message||error)};
+  }finally{await lock.release();}
+}
 
 
 async function evaluateCriticalCandidates(env,names) {
@@ -256,6 +284,22 @@ export class OpportunityAlarm extends CriticalAlarm {
   constructor(ctx,env){super(ctx,env,validateCriticalCoin);}
 }
 
+async function revalidateFinderCandidates(candidates) {
+  const [tickers,books]=await Promise.all([all24hTickers(),allBookTickers()]);
+  const valid=validTryPairs(tickers,books),tickerMap=new Map(tickers.map(x=>[String(x.symbol||x.s||''),x])),bookMap=new Map(books.map(x=>[String(x.symbol||x.s||''),x]));
+  const checked=[],errors=[];
+  for(const old of candidates.slice(0,TRACK_COUNT)){
+    const name=cleanBase(old?.name);
+    if(!valid.has(name)){errors.push(`${name}: pair inactive`);continue;}
+    try{
+      const fresh=await analyzeCandidate(name,tickerMap.get(name+'TRY')||tickerMap.get(name+'_TRY'),bookMap);
+      if(!hardGateReason(fresh)&&!['WATCH','PULLBACK'].includes(candidateState(fresh)))checked.push(fresh);
+    }catch(error){errors.push(`${name}: ${String(error?.message||error)}`);}
+  }
+  if(checked.length)assignCandidateScores(checked);
+  return {candidates:checked.sort(compareCandidateState).slice(0,TRACK_COUNT),errors};
+}
+
 async function backgroundCycle(env, opts = {}) {
   const previous = await loadState(env);
   const shouldFullScan = Boolean(opts.forceFullScan || opts.fourHourly || !(previous.tracked || []).length);
@@ -265,12 +309,19 @@ async function backgroundCycle(env, opts = {}) {
   let tickerMap = new Map();
   let bookMap = new Map();
   let validPairs = new Set();
+  let serverRevalidationErrors=[];
   if (shouldFullScan) {
     market = await scanMarket();
     tickerMap = market.tickerMap || new Map();
     bookMap = market.bookMap || new Map();
     validPairs = market.validPairs || new Set();
     marketTop3 = market.metrics.filter(x=>{return !hardGateReason(x)&&!['WATCH','PULLBACK'].includes(candidateState(x));}).sort(compareCandidateState).slice(0,TRACK_COUNT);
+    if(opts.serverFinder&&marketTop3.length){
+      const revalidated=await revalidateFinderCandidates(marketTop3);
+      marketTop3=revalidated.candidates;
+      serverRevalidationErrors=revalidated.errors;
+      if(!marketTop3.length&&serverRevalidationErrors.length)throw new Error(`SCAN DATA ERROR: ${serverRevalidationErrors.join(' | ')}`);
+    }
   } else {
     const [tickers, books] = await Promise.all([
       all24hTickers().catch(() => []),
@@ -300,7 +351,10 @@ async function backgroundCycle(env, opts = {}) {
   }
 
   let tracked;
-  if (currentTracked.length) {
+  if (opts.serverFinder && shouldFullScan) {
+    // Sunucu taraması yalnız bu mumda yeniden doğrulanan piyasa adaylarını izler.
+    tracked = sortByProfit(marketTop3).slice(0, TRACK_COUNT);
+  } else if (currentTracked.length) {
     // Web sayfasının seçtiği coinleri değiştirme; sadece kâr potansiyeline göre sırala.
     tracked = sortByProfit(currentTracked).slice(0, TRACK_COUNT);
     for (const candidate of (shouldFullScan ? marketTop3 : [])) {
@@ -312,8 +366,10 @@ async function backgroundCycle(env, opts = {}) {
   }
   if (!shouldFullScan && analysisErrors.length) tracked = currentTracked.filter(x=>!hardGateReason(x)).slice(0,TRACK_COUNT);
 
-  const analysisReady = analysisErrors.length === 0 && tracked.length > 0;
-  const marketAlerts = opts.collectAlerts && opts.quarterHourly && analysisReady ? await buildPositionAlerts(env, previous.tracked || [], tracked) : [];
+  // Server Finder yalnız yeniden doğrulanmış adayları kullanır; başka bir adayın
+  // doğrulama hatası güvenli kalan adayı susturmaz, fakat tanı kaydında korunur.
+  const analysisReady = tracked.length > 0 && (opts.serverFinder || analysisErrors.length === 0);
+  const marketAlerts = opts.collectAlerts && opts.quarterHourly && analysisReady ? await buildPositionAlerts(env, previous.tracked || [], tracked, previous.opportunityStates || {}) : [];
   const positionMonitor = await monitorActivePositions(
     env,
     previous.positions || [],
@@ -331,6 +387,7 @@ async function backgroundCycle(env, opts = {}) {
     ...latestBeforeSave,
     tracked,
     marketTop3,
+    opportunityStates:compactOpportunityStates(previous.opportunityStates||{},tracked),
     positions: mergedPositions,
     source: opts.source || previous.source || 'cron',
     lastAlerts: positionAlerts,
@@ -340,12 +397,12 @@ async function backgroundCycle(env, opts = {}) {
     last4hScanAt: opts.fourHourly && analysisReady ? (opts.scheduledAt || new Date().toISOString()) : (previous.last4hScanAt || null),
     last4hScanned: opts.fourHourly ? (market?.scanned || 0) : (previous.last4hScanned || null),
     lastPositionCheckAt: mergedPositions.length ? (opts.scheduledAt || new Date().toISOString()) : (previous.lastPositionCheckAt || null),
-    lastAnalysisErrors:analysisErrors,
+    lastAnalysisErrors:[...analysisErrors,...serverRevalidationErrors],
     lastNotificationErrors: [],
     updatedAt: new Date().toISOString()
   };
 
-  const notificationErrors = analysisErrors.map(x=>`analysis: ${x}`);
+  const notificationErrors = [...analysisErrors,...serverRevalidationErrors].map(x=>`analysis: ${x}`);
   const notifySafely = async (label, fn) => {
     try { await fn(); return true; }
     catch (e) { notificationErrors.push(`${label}: ${String(e?.message || e)}`); return false; }
@@ -432,7 +489,23 @@ function chooseTracked(current, marketTop3) {
   return list.sort(compareCandidate).slice(0, TRACK_COUNT);
 }
 
-async function buildPositionAlerts(env, prevList, nowList) {
+function opportunityAlert(type,x,title) {
+  const p=x?.p||{},decision=candidateState(x),kind=decision==='BUY'?'MARKET':'CONDITIONAL',quality=finderEntryQuality(x,kind),entry=Number(kind==='MARKET'?p.marketEntry:p.conditionalEntry);
+  return {type,name:x.name,title,body:`Fiyat ${fmtPrice(x.m?.price)} • ${kind==='MARKET'?'giriş':'koşullu giriş'} ${fmtPrice(entry)} • Ana D1 ${fmtPrice(p.mainTarget)} • kâr alanı +${fmt2(quality.profit)}% • R/R 1:${fmt2(kind==='MARKET'?p.marketRR:p.conditionalRR)} • desteğe ${fmtPct(p.dist)}`};
+}
+
+function compactOpportunityStates(previous,list,now=Date.now()) {
+  const result={};
+  for(const [name,value] of Object.entries(previous||{}))if(now-Number(value?.at||0)<24*60*60*1000)result[name]=value;
+  for(const x of list||[])result[cleanBase(x.name)]={state:candidateState(x),at:now,entry:Number(x.p?.conditionalEntry||x.p?.marketEntry),zoneLow:Number(x.p?.zoneLow),zoneHigh:Number(x.p?.zoneHigh)};
+  return Object.fromEntries(Object.entries(result).sort((a,b)=>Number(b[1]?.at||0)-Number(a[1]?.at||0)).slice(0,64));
+}
+
+function opportunityStateRank(state) {
+  return ({REJECT:0,WATCH:0,LIMIT_WAIT:1,EARLY:2,CONDITIONAL:3,BUY:4})[String(state||'REJECT')]||0;
+}
+
+async function buildPositionAlerts(env, prevList, nowList, previousStates = {}) {
   const prev = new Map(prevList.map(x => [cleanBase(x.name), x]));
   const candidates = [];
   const leader = sortByProfit(nowList)[0];
@@ -455,7 +528,7 @@ async function buildPositionAlerts(env, prevList, nowList) {
 
     const prevD = Number(p?.p?.dist ?? 99);
     const prevBuy = Number(p?.buy || 0);
-    const previousDecision = p ? candidateState(p) : 'REJECT';
+    const previousDecision = p ? candidateState(p) : String(previousStates?.[x.name]?.state||'REJECT');
     const prevBuyReady = previousDecision === 'BUY';
     const prevConditionalReady = previousDecision === 'CONDITIONAL';
     const prevNear = prevD >= -0.20 && prevD <= 0.80;
@@ -463,15 +536,20 @@ async function buildPositionAlerts(env, prevList, nowList) {
     const prevT1 = Number(p?.p?.mainTarget || p?.p?.t2 || p?.p?.t1 || 0);
     const prevRemain = (prevPrice>0 && prevT1>0) ? ((prevT1-prevPrice)/prevPrice*100) : 99;
 
-    if (!p && !buyReady && !conditionalReady) {
-      candidates.push({type:'TRACK_NEW',name:x.name,title:`🆕 Takip: ${x.name}/TRY`,body:'Takip kaydı oluşturuldu. Alım sinyali değildir; giriş koşulları sağlanmadı.'});
-      continue;
+    const previousRank = opportunityStateRank(previousDecision);
+    if (buyReady && previousRank < opportunityStateRank('BUY')) {
+      candidates.push(opportunityAlert('BUY_READY',x,`🎯 ${x.name}/TRY — TEYİTLİ PİYASA GİRİŞİ`));
     }
-    if (buyReady && !prevBuyReady) {
-      candidates.push({type:'BUY_READY',name:x.name,title:`🎯 ${x.name}/TRY — TEYİTLİ PİYASA GİRİŞİ`,body:`AL ${fmt1(buy)}/10 • desteğe ${fmtPct(d)} • piyasa R/K 1:${fmt2(x.p?.marketRR)}`});
+    if (conditionalReady && previousRank < opportunityStateRank('CONDITIONAL')) {
+      candidates.push(opportunityAlert('CONDITIONAL_READY',x,`🟡 ${x.name}/TRY — KOŞULLU GİRİŞ HAZIR`));
     }
-    if (conditionalReady && !prevConditionalReady) {
-      candidates.push({type:'CONDITIONAL_READY',name:x.name,title:`🟡 ${x.name}/TRY — KOŞULLU GİRİŞ HAZIR`,body:`Şimdi piyasa girişi değil • limit ${fmtPrice(x.p?.conditionalEntry)} • stop ${fmtPrice(x.p?.stop)} • koşullu R/K 1:${fmt2(x.p?.conditionalRR)}`});
+    if(decision==='EARLY'&&previousRank < opportunityStateRank('EARLY')){
+      candidates.push(opportunityAlert('EARLY_READY',x,`🟡 ${x.name}/TRY — ERKEN FIRSAT / HAZIRLAN`));
+    }
+    const recovery=x.p?.recovery||{},quality=finderEntryQuality(x);
+    const safeDip=decision==='LIMIT_WAIT'&&quality.historicalScore>=15&&quality.reversalScore>=1&&(recovery.higherLow||recovery.base||recovery.reclaim);
+    if(safeDip&&previousRank < opportunityStateRank('LIMIT_WAIT')){
+      candidates.push(opportunityAlert('DIP_REVERSAL',x,`👁 ${x.name}/TRY — DİP / DÖNÜŞ ADAYI`));
     }
     if (buyReady && nearSupport && !prevNear) {
       candidates.push({type:'SUPPORT_NEAR',name:x.name,title:`🔔 ${x.name}/TRY alım bölgesinde`,body:`Desteğe ${fmtPct(d)} • AL ${fmt1(buy)}/10 • kâr potansiyeli +${fmt2(upside)}% • teyit ${x.p?.bounce?'VAR':'BEKLENİYOR'}`});
@@ -1308,7 +1386,7 @@ async function sendOneSignal(env,alerts){
     body:JSON.stringify({
       app_id:env.ONESIGNAL_APP_ID,
       target_channel:'push',
-      included_segments:['Subscribed Users'],
+      include_subscription_ids:[...ALARM_RECIPIENTS],
       headings:{en:title},
       contents:{en:body},
       priority:critical?10:5,

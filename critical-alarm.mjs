@@ -18,6 +18,25 @@ export class CriticalAlarm {
     const path = new URL(request.url).pathname;
     if (request.method !== 'POST') return Response.json({ok:false}, {status:405});
     const body = await request.json().catch(() => ({}));
+    if (path === '/scan-lock') {
+      const window = String(body.window || ''), now = this.now();
+      if (!/^\d{10,16}$/.test(window)) return Response.json({ok:false}, {status:400});
+      let acquired = false, token = '';
+      await this.storage.transaction(async tx => {
+        const current = await tx.get('scanLock');
+        if (current && current.expiresAt > now) return;
+        token = crypto.randomUUID(); acquired = true;
+        await tx.put('scanLock', {window, token, expiresAt:now+12*60_000});
+      });
+      return Response.json({ok:true, acquired, token});
+    }
+    if (path === '/scan-unlock') {
+      await this.storage.transaction(async tx => {
+        const current = await tx.get('scanLock');
+        if (current?.token === body.token) await tx.delete('scanLock');
+      });
+      return Response.json({ok:true});
+    }
     if (path === '/start') return this.serial(() => this.start(body.coin));
     const state = await this.storage.get('state');
     if (!state || body.id !== state.id || body.token !== state.token || body.coin !== state.coin)

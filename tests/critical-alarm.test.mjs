@@ -7,7 +7,7 @@ import {CriticalAlarm,ALARM_RECIPIENTS} from '../critical-alarm.mjs';
 
 function harness(){
   const records=new Map();let wake=null,now=1_000_000;
-  const storage={get:async k=>structuredClone(records.get(k)),put:async(k,v)=>records.set(k,structuredClone(v)),setAlarm:async n=>{wake=n;},deleteAlarm:async()=>{wake=null;},transaction:async fn=>fn(storage)};
+  const storage={get:async k=>structuredClone(records.get(k)),put:async(k,v)=>records.set(k,structuredClone(v)),delete:async k=>records.delete(k),setAlarm:async n=>{wake=n;},deleteAlarm:async()=>{wake=null;},transaction:async fn=>fn(storage)};
   const env={CRITICAL_ALARM_ENABLED:'true'},plan={kind:'CONDITIONAL',entry:99,stop:98,target:101,rr:2};
   let current=plan,checks=0;
   const alarm=new CriticalAlarm({storage},env,async()=>{checks++;return current;});
@@ -17,6 +17,16 @@ function harness(){
   return {alarm,storage,env,sent,setPlan:p=>current=p,advance:ms=>{now+=ms;},get checks(){return checks;},get wake(){return wake;}};
 }
 function request(path,body){return new Request('https://alarm'+path,{method:'POST',body:JSON.stringify(body)});}
+
+test('scheduled Finder lock prevents overlap and can only be released by its owner',async()=>{
+  const h=harness(),first=await (await h.alarm.fetch(request('/scan-lock',{window:'1724889600000'}))).json();
+  assert.equal(first.acquired,true);assert.ok(first.token);
+  const overlap=await (await h.alarm.fetch(request('/scan-lock',{window:'1724889600000'}))).json();assert.equal(overlap.acquired,false);
+  await h.alarm.fetch(request('/scan-unlock',{token:'wrong'}));
+  assert.equal((await (await h.alarm.fetch(request('/scan-lock',{window:'1724889600000'}))).json()).acquired,false);
+  await h.alarm.fetch(request('/scan-unlock',{token:first.token}));
+  assert.equal((await (await h.alarm.fetch(request('/scan-lock',{window:'1724889600000'}))).json()).acquired,true);
+});
 
 test('immediate + 30 second repeats, six sends maximum, no backlog after 3 minutes',async()=>{
   const h=harness();await h.alarm.fetch(request('/start',{coin:'HEMI'}));assert.equal(h.sent.length,1);

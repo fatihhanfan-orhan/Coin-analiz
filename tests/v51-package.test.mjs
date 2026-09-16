@@ -35,6 +35,36 @@ test('normal push follows the final market decision after profit becomes a ranki
  alerts=await run(w,'buildPositionAlerts({},[previous],[x])');assert.equal(alerts.length,0,'a better target on the same candle is not a second decision event');
 });
 
+test('server Finder schedules after each closed 15m candle and promotes early states without duplicate or downgrade alerts',async()=>{
+ const w=edge();run(w,'alertAllowed=async()=>true');
+ assert.match(worker,/finderDue\s*=\s*minute\s*%\s*15\s*===\s*1/);
+ assert.match(worker,/runScheduledFinder\(env,t\)/);
+ assert.match(worker,/forceFullScan:true,serverFinder:true,collectAlerts:true,quarterHourly:true/);
+ assert.match(worker,/revalidateFinderCandidates\(marketTop3\)/);
+ assert.match(worker,/lastServerScanStatus='SCAN DATA ERROR'/);
+ assert.match(worker,/if\s*\(opts\.serverFinder\s*&&\s*shouldFullScan\)/);
+ const x=fixture();x.p.conditionalEntry=100;x.p.marketRR=1.5;x.p.conditionalRR=1.5;x.p.dist=1;x.p.near=false;x.p.bounce=false;
+ w.x=x;assert.equal(run(w,'candidateState(x)'),'EARLY');
+ let alerts=await run(w,'buildPositionAlerts({},[],[x])');assert.ok(Array.from(alerts,a=>a.type).includes('EARLY_READY'));
+ alerts=await run(w,"buildPositionAlerts({},[],[x],{HEMI:{state:'EARLY',at:Date.now()}})");assert.ok(!Array.from(alerts,a=>a.type).includes('EARLY_READY'));
+ const conditional=structuredClone(x);conditional.p.conditionalEntry=99;conditional.p.conditionalRR=2;w.conditional=conditional;
+ assert.equal(run(w,'candidateState(conditional)'),'CONDITIONAL');
+ alerts=await run(w,'buildPositionAlerts({},[x],[conditional])');assert.ok(Array.from(alerts,a=>a.type).includes('CONDITIONAL_READY'));
+ alerts=await run(w,'buildPositionAlerts({},[conditional],[x])');assert.ok(!Array.from(alerts,a=>a.type).some(t=>['EARLY_READY','DIP_REVERSAL'].includes(t)),'state downgrade must not notify');
+});
+
+test('ordinary OneSignal delivery is restricted to the two verified Android subscriptions',async()=>{
+ assert.match(worker,/include_subscription_ids:\[\.\.\.ALARM_RECIPIENTS\]/);
+ assert.doesNotMatch(worker,/included_segments:\['Subscribed Users'\]/);
+ assert.doesNotMatch(worker,/12640147-f79d-42c5-a046-66aefecc46fb/);
+ const w=edge();let payload;
+ w.fetch=async(_,options)=>{payload=JSON.parse(options.body);return Response.json({id:'mock-message'});};
+ w.env={ONESIGNAL_APP_ID:'app',ONESIGNAL_API_KEY:'secret-placeholder',APP_URL:'https://fatihhanfan-orhan.github.io/Coin-analiz/'};
+ await run(w,"sendOneSignal(env,[{type:'EARLY_READY',name:'HEMI',title:'Erken fırsat',body:'Test'}])");
+ assert.deepEqual(Array.from(payload.include_subscription_ids),['20086d0a-b694-4d98-aa52-c5cfdf81fd08','90f81c0e-3c8d-40ef-860b-fd315861717d']);
+ assert.equal(payload.included_segments,undefined);assert.ok(!JSON.stringify(payload).includes('secret-placeholder'));
+});
+
 test('Edge open + Android background: critical event is Worker-only and KV-deduplicated',async()=>{
  const a=app(),w=edge(),memory=new Map();
  assert.doesNotMatch(String(a.maybeFastLocalPositionAlert),/showSystemNotification/);
