@@ -1146,7 +1146,7 @@ async function analyzeCandidate(name, t24, bookMap = new Map(), freshAlarmQuote 
   const vola = volatility15(a);
   const trend = (m.ema9>m.ema21?1:0)+(h.ema9>h.ema21?1:0)+(m.macd>m.signal?1:0)+(m.hist>m.prevHist?1:0);
   const flow=buildFlowContext(a,orders,m),p = enrichRecoveryPlan(tradePlan(a,b,m,h),a,b,k4h,daily,m,h,flow,spread);
-  const fastMode=vRatio>=1.8&&Math.abs((m.price/m.closedPrice-1)*100)>=Math.max(.8,vola*.7),out = { name,qv,marketCap:NaN,marketCapStatus:'VERİ YOK',ch,spread,vRatio,impulse,vola,fastMode,trend,buy:score(m,h,p).buy,m,h,p,flow };
+  const fastMode=vRatio>=1.8&&Math.abs((m.price/m.closedPrice-1)*100)>=Math.max(.8,vola*.7),out = { name,qv,marketCap:NaN,marketCapStatus:'VERİ YOK',ch,spread,vRatio,impulse,vola,fastMode,trend,buy:score(m,h,p).buy,m,h,p,flow,opportunity24:opportunityHistory24(a) };
   out.freshness={quoteAt,closes:[a,b,k4h,daily].map(rows=>Number(rows.at(-1)?.[6]))};
   out.rpot = resistancePotential(out);
   return out;
@@ -1465,6 +1465,22 @@ function unwrapArray(j){if(Array.isArray(j))return j;if(Array.isArray(j?.data))r
 function num(o,...ks){for(const k of ks){const v=+o?.[k];if(Number.isFinite(v))return v;}return 0;}
 function norm(v,min,max){if(max<=min)return .5;return Math.max(0,Math.min(1,(v-min)/(max-min)));}
 function volatility15(k){const a=k.slice(-16);if(a.length<5)return 0;return a.slice(1).reduce((sum,x)=>sum+((+x[2]-+x[3])/(+x[4]||1))*100,0)/(a.length-1);}
+function opportunityHistory24(rows,costPct=0){
+ const bars=(rows||[]).slice(-96).filter(r=>Number(r?.[0])>0&&Number(r?.[2])>0&&Number(r?.[3])>0),cost=Math.max(0,Number(costPct)||0),items=[];
+ if(bars.length<2)return{count3:0,count5:0,average:0,max:0,items,method:'Tarihsel yaklaşık',costIncluded:cost>0};
+ let start=0,entry=Number(bars[0][3]),peak=Number(bars[0][2]),peakAt=0;
+ const add=()=>{const net=(peak/entry-1)*100-cost;if(peakAt>start&&net>=3-1e-9)items.push({startAt:Number(bars[start][0]),peakAt:Number(bars[peakAt][6]||bars[peakAt][0]),entry,peak,maxNet:net});};
+ for(let i=1;i<bars.length;i++){
+  const low=Number(bars[i][3]),high=Number(bars[i][2]),gain=(peak/entry-1)*100-cost;
+  if(gain<3&&low<entry){start=i;entry=low;peak=high;peakAt=i;continue;}
+  if(high>peak){peak=high;peakAt=i;}
+  const net=(peak/entry-1)*100-cost,pullback=(peak-low)/peak*100;
+  if(net>=3&&i>peakAt&&pullback>=1.5){add();start=i;entry=low;peak=high;peakAt=i;}
+ }
+ add();
+ const values=items.map(x=>x.maxNet),sum=values.reduce((a,b)=>a+b,0);
+ return{count3:values.length,count5:values.filter(v=>v>=5-1e-9).length,average:values.length?sum/values.length:0,max:values.length?Math.max(...values):0,items,method:'Tarihsel yaklaşık',costIncluded:cost>0};
+}
 function atr(k,p=14){const tr=[];for(let i=1;i<k.length;i++){const hi=+k[i][2],lo=+k[i][3],pc=+k[i-1][4];tr.push(Math.max(hi-lo,Math.abs(hi-pc),Math.abs(lo-pc)));}return tr.slice(-p).reduce((a,b)=>a+b,0)/Math.max(1,Math.min(p,tr.length));}
 function swingLevels(k,type='low',look=3,limit=90){const a=k.slice(-limit),out=[];for(let i=look;i<a.length-look;i++){const v=+(type==='low'?a[i][3]:a[i][2]);let ok=true;for(let j=i-look;j<=i+look;j++){if(j===i)continue;const q=+(type==='low'?a[j][3]:a[j][2]);if(type==='low'?(q<v):(q>v)){ok=false;break;}}if(ok)out.push(v);}return out;}
 function clusteredLevel(vals,price,side,tolPct=.45){const eligible=vals.filter(v=>side==='below'?v<=price:v>=price);if(!eligible.length)return NaN;let best=null;for(const v of eligible){const tol=v*tolPct/100,touches=vals.filter(x=>Math.abs(x-v)<=tol).length,dist=Math.abs(price-v)/price*100,quality=touches*3-Math.min(dist,12)*.18;if(!best||quality>best.quality)best={v,touches,quality,dist};}return best?.v;}

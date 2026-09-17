@@ -494,6 +494,7 @@ function card(name,data,error){
  return `<div class="coin ${c}border" data-coin="${sid}"><div class="coin-head"><div><div class="coin-title">${name}/TRY</div><div class="price" id="livePrice_${sid}">${fmt(m.price,6)}</div><div class="chg ${m.change>=0?'good':'bad'}" id="liveChange_${sid}">${m.change>=0?'+':''}${fmt(m.change,2)}% • son 15 dk kapanışına göre</div></div><div class="sub"><span id="ws_${sid}" class="wsOff">● bağlanıyor</span><br><span id="dataTime_${sid}">veri zamanı bekleniyor</span><br>15 dk + 1 sa</div></div>
  <div class="liveStrip"><div class="liveBox"><b>SATIŞTA ALACAĞIN (BID)</b><span id="bid_${sid}">—</span></div><div class="liveBox"><b>ALIMDA ÖDEYECEĞİN (ASK)</b><span id="ask_${sid}">—</span></div><div class="liveBox"><b>${refLabel('SPREAD','spread')}</b><span id="spread_${sid}">—</span></div><div class="liveBox"><b>${refLabel('DESTEĞE MESAFE','supportDistance')}</b><span id="supportDist_${sid}">${p.dist>0?'+':''}${fmt(p.dist,2)}%</span></div></div>
  <div class="supportScore ${sp.pts>=2.5?'good':sp.pts>=1.4?'mid':'bad'}">🎯 DESTEK YAKINLIK PUANI: ${sp.pts}/3 • ${sp.label}</div>
+ ${opportunity24HTML(data.opportunity24)}
  ${planUI(p,m,h)}<div class="decision ${c}">${st.label}<div class="decisionSub">Piyasa ve koşullu pullback girişleri ayrı değerlendirilir</div></div>
  <button class="quickBuyBtn" data-coin="${sid}" onclick="quickAddPosition('${sid}',this)" disabled>⏳ CANLI ASK BEKLENİYOR…</button>
  <div class="quickBuyNote">Sadece Binance TR canlı ASK doğrulanınca aktif olur. Bu buton gerçek Binance emri göndermez.</div>
@@ -551,7 +552,7 @@ async function analyze(name,opts={}){
  const flow=buildFlowContext(a,orders,m),p=enrichRecoveryPlan(tradePlan(a,b,m,h),a,b,k4h,daily,m,h,flow,book.spread),s=score(m,h,p),vRatio=m.vma5?m.vol/m.vma5:0;
  const opportunity={name,spread:book.spread,vRatio,m,h,p,s,flow};
  const rpot=resistancePotential(opportunity);
- const data={m,h,p,s,rpot,flow,bid:book.bid,ask:book.ask,spread:book.spread,analyzedAt:Date.now()};
+ const data={m,h,p,s,rpot,flow,opportunity24:opportunityHistory24(a),bid:book.bid,ask:book.ask,spread:book.spread,analyzedAt:Date.now()};
  technicalAnalysisCache[clean]={data,expiresAt:technicalCacheExpiry()};
  return data;
 }
@@ -570,6 +571,26 @@ function baseFromSymbol(sym){return String(sym||'').replace(/_?TRY$/,'')}
 function num(o,...ks){for(const k of ks){const v=+o?.[k];if(Number.isFinite(v))return v}return 0}
 function norm(v,min,max){if(max<=min)return .5;return Math.max(0,Math.min(1,(v-min)/(max-min)))}
 function volatility15(k){const a=k.slice(-16);if(a.length<5)return 0;return a.slice(1).reduce((sum,x)=>sum+((+x[2]-+x[3])/(+x[4]||1))*100,0)/(a.length-1)}
+function opportunityHistory24(rows,costPct=0){
+ const bars=(rows||[]).slice(-96).filter(r=>Number(r?.[0])>0&&Number(r?.[2])>0&&Number(r?.[3])>0),cost=Math.max(0,Number(costPct)||0),items=[];
+ if(bars.length<2)return{count3:0,count5:0,average:0,max:0,items,method:'Tarihsel yaklaşık',costIncluded:cost>0};
+ let start=0,entry=Number(bars[0][3]),peak=Number(bars[0][2]),peakAt=0;
+ const add=()=>{const net=(peak/entry-1)*100-cost;if(peakAt>start&&net>=3-1e-9)items.push({startAt:Number(bars[start][0]),peakAt:Number(bars[peakAt][6]||bars[peakAt][0]),entry,peak,maxNet:net});};
+ for(let i=1;i<bars.length;i++){
+  const low=Number(bars[i][3]),high=Number(bars[i][2]),gain=(peak/entry-1)*100-cost;
+  if(gain<3&&low<entry){start=i;entry=low;peak=high;peakAt=i;continue;}
+  if(high>peak){peak=high;peakAt=i;}
+  const net=(peak/entry-1)*100-cost,pullback=(peak-low)/peak*100;
+  if(net>=3&&i>peakAt&&pullback>=1.5){add();start=i;entry=low;peak=high;peakAt=i;}
+ }
+ add();
+ const values=items.map(x=>x.maxNet),sum=values.reduce((a,b)=>a+b,0);
+ return{count3:values.length,count5:values.filter(v=>v>=5-1e-9).length,average:values.length?sum/values.length:0,max:values.length?Math.max(...values):0,items,method:'Tarihsel yaklaşık',costIncluded:cost>0};
+}
+function opportunity24HTML(o){
+ const x=o||{count3:0,count5:0,average:0,items:[]},time=t=>new Date(Number(t)).toLocaleString('tr-TR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}),rows=(x.items||[]).map(v=>`<small>${time(v.startAt)} → ${time(v.peakAt)} • maks. yaklaşık %${fmt(v.maxNet,2)}</small>`).join('');
+ return `<div class="respot"><b>24S FIRSAT: ${x.count3||0}× ≥%3 | ${x.count5||0}× ≥%5 | Ort. %${fmt(x.average||0,1)}</b><details class="technicalDetails"><summary>24 SAATLİK FIRSAT AYRINTISI</summary>${rows||'<small>Son 24 saatte ≥%3 hareket yok.</small>'}<small>${x.method||'Tarihsel yaklaşık'} • 15 dk mum OHLC; tarihsel ASK/BID yok, komisyon/spread dahil değil.</small></details></div>`;
+}
 
 function resistancePotential(x){
   const p=x.p||{}, m=x.m||{}, h=x.h||{};
@@ -609,7 +630,7 @@ async function candidateMetrics(name,t24,bookMap){
  if(current>0){m.price=current;m.change=(current/m.closedPrice-1)*100}
  const vRatio=m.vma5?m.vol/m.vma5:0,impulse=m.vma10?m.vma5/m.vma10:0,vola=volatility15(a);
  const flow=buildFlowContext(a,orders,m),trend=(m.ema9>m.ema21?1:0)+(h.ema9>h.ema21?1:0)+(m.macd>m.signal?1:0)+(m.hist>m.prevHist?1:0),p=enrichRecoveryPlan(tradePlan(a,b,m,h),a,b,k4h,daily,m,h,flow,spread);
- const fastMode=vRatio>=1.8&&Math.abs((m.price/m.closedPrice-1)*100)>=Math.max(.8,vola*.7),out={name,qv,marketCap:NaN,marketCapStatus:'VERİ YOK',ch,spread,vRatio,impulse,vola,fastMode,trend,buy:score(m,h,p).buy,m,h,p,flow,analyzedAt:Date.now()};out.rpot=resistancePotential(out);return out;
+ const fastMode=vRatio>=1.8&&Math.abs((m.price/m.closedPrice-1)*100)>=Math.max(.8,vola*.7),out={name,qv,marketCap:NaN,marketCapStatus:'VERİ YOK',ch,spread,vRatio,impulse,vola,fastMode,trend,buy:score(m,h,p).buy,m,h,p,flow,opportunity24:opportunityHistory24(a),analyzedAt:Date.now()};out.rpot=resistancePotential(out);return out;
 }
 async function findDaily3(opts={}){
  const previousTracked=loadWatch();
@@ -658,11 +679,11 @@ async function findDaily3(opts={}){
     const ok=true;
     const tracked=loadWatch().includes(x.name),st=x.scanState;
     const rec=x.p.recovery||{},flow=moneyFlowModel(x),active=loadPositions().some(p=>p.name===x.name),targetLine=`Ara ${fmt(x.p.interimTarget,6)} • Ana D1 ${fmt(x.p.mainTarget,6)}`;
-    return `<div class="cand"><b>${st.key==='CONFIRMED'?'🟢':st.key==='CONDITIONAL'||st.key==='EARLY'||st.key==='LIMIT_WAIT'?'🟡':'👁'} ${st.label} • ${i+1}. ${x.name}/TRY</b><div class="statePill ${st.tone}">${active?'ALINDI / TAKİPTE':st.label}</div><div class="cp ${x.candidate>=75?'good':x.candidate>=60?'mid':''}">${x.candidate.toFixed(0)}/100</div><small>Piyasa ${fmt(x.p.marketEntry,6)} • koşullu ${fmt(x.p.conditionalEntry,6)} • uzaklık %${fmt((x.p.marketEntry/x.p.conditionalEntry-1)*100,2)}</small><small>Piyasa R/R 1:${fmt(x.p.marketRR,2)} • koşullu R/R 1:${fmt(x.p.conditionalRR,2)}</small><small>Ağırlıklı alan tahmini (komisyon hariç) yaklaşık +%${fmt(x.rpot.expectedEdge,2)} • brüt koşullu giriş→Ana D1 +%${fmt(x.rpot.upside1,2)}</small>${x.rpot.upside1<3?'<small class="bad">⚠️ KÂR ALANI DÜŞÜK — %3 kalite referansının altında (eleme değildir)</small>':''}<small>Girişe göre kâr sınıfı: ${finderEntryQuality(x,st.key==='CONDITIONAL'?'CONDITIONAL':'MARKET').band}</small><small>${targetLine}</small><small>Destek mesafesi: ${x.p.dist>0?'+':''}${x.p.dist.toFixed(2)}%</small><small>15dk hacim: ${x.vRatio.toFixed(2)}× MA5</small><small>Spread: ${x.spread.toFixed(3)}%</small><small>24s TRY hacmi: ${fmt(x.qv,0)}</small><small>Para akışı 15dk/30dk/1s: ${flow.status==='REAL'?[flow.m15,flow.m30,flow.h1].map(v=>(v>=0?'+':'')+fmt(v,0)).join(' / '):'VERİ YOK'}${flow.distribution?' • DAĞITIM RİSKİ':''}</small><div class="respot"><b>3/5/7 GÜNLÜK DÖNÜŞ + TOPARLANMA</b><strong class="${rec.state==='TOPARLANMA TEYİDİ'?'potgood':rec.confirmedSupportBreak?'potbad':'potmid'}">${rec.state||'VERİ YOK'}</strong><small>Değişim 3g ${fmt(rec.drops?.d3,2)}% • 5g ${fmt(rec.drops?.d5,2)}% • 7g ${fmt(rec.drops?.d7,2)}%</small><small>Maksimum toparlanma alanı ≈ +%${fmt(rec.maxRecoveryPct,2)}</small></div><button class="trackBtn ${tracked||active?'tracked':''}" ${tracked||active?'disabled':''} onclick="trackOpportunity('${x.name}',this)">${active?'✅ ALINDI / TAKİPTE':tracked?'✅ TAKİPTE':'👁️ TAKİBE AL'}</button></div>`;
+    return `<div class="cand"><b>${st.key==='CONFIRMED'?'🟢':st.key==='CONDITIONAL'||st.key==='EARLY'||st.key==='LIMIT_WAIT'?'🟡':'👁'} ${st.label} • ${i+1}. ${x.name}/TRY</b><div class="statePill ${st.tone}">${active?'ALINDI / TAKİPTE':st.label}</div><div class="cp ${x.candidate>=75?'good':x.candidate>=60?'mid':''}">${x.candidate.toFixed(0)}/100</div>${opportunity24HTML(x.opportunity24)}<small>Piyasa ${fmt(x.p.marketEntry,6)} • koşullu ${fmt(x.p.conditionalEntry,6)} • uzaklık %${fmt((x.p.marketEntry/x.p.conditionalEntry-1)*100,2)}</small><small>Piyasa R/R 1:${fmt(x.p.marketRR,2)} • koşullu R/R 1:${fmt(x.p.conditionalRR,2)}</small><small>Ağırlıklı alan tahmini (komisyon hariç) yaklaşık +%${fmt(x.rpot.expectedEdge,2)} • brüt koşullu giriş→Ana D1 +%${fmt(x.rpot.upside1,2)}</small>${x.rpot.upside1<3?'<small class="bad">⚠️ KÂR ALANI DÜŞÜK — %3 kalite referansının altında (eleme değildir)</small>':''}<small>Girişe göre kâr sınıfı: ${finderEntryQuality(x,st.key==='CONDITIONAL'?'CONDITIONAL':'MARKET').band}</small><small>${targetLine}</small><small>Destek mesafesi: ${x.p.dist>0?'+':''}${x.p.dist.toFixed(2)}%</small><small>15dk hacim: ${x.vRatio.toFixed(2)}× MA5</small><small>Spread: ${x.spread.toFixed(3)}%</small><small>24s TRY hacmi: ${fmt(x.qv,0)}</small><small>Para akışı 15dk/30dk/1s: ${flow.status==='REAL'?[flow.m15,flow.m30,flow.h1].map(v=>(v>=0?'+':'')+fmt(v,0)).join(' / '):'VERİ YOK'}${flow.distribution?' • DAĞITIM RİSKİ':''}</small><div class="respot"><b>3/5/7 GÜNLÜK DÖNÜŞ + TOPARLANMA</b><strong class="${rec.state==='TOPARLANMA TEYİDİ'?'potgood':rec.confirmedSupportBreak?'potbad':'potmid'}">${rec.state||'VERİ YOK'}</strong><small>Değişim 3g ${fmt(rec.drops?.d3,2)}% • 5g ${fmt(rec.drops?.d5,2)}% • 7g ${fmt(rec.drops?.d7,2)}%</small><small>Maksimum toparlanma alanı ≈ +%${fmt(rec.maxRecoveryPct,2)}</small></div><button class="trackBtn ${tracked||active?'tracked':''}" ${tracked||active?'disabled':''} onclick="trackOpportunity('${x.name}',this)">${active?'✅ ALINDI / TAKİPTE':tracked?'✅ TAKİPTE':'👁️ TAKİBE AL'}</button></div>`;
   }).join('');
   const preparationCards=preparation.map((x,i)=>{
     const plan=preparationCandidate(x),q=finderEntryQuality(x),tracked=loadWatch().includes(x.name),active=loadPositions().some(p=>p.name===x.name);
-    return `<div class="cand prep"><b>👁 ${i+1}. ${x.name}/TRY</b><div class="statePill yellow">${plan.label}</div><div class="cp ${x.candidate>=60?'mid':''}">${x.candidate.toFixed(0)}/100</div><small>Bu kart işlem sinyali değildir.</small><small>Piyasa/koşullu kâr alanı: %${fmt(q.marketProfit,2)} / %${fmt(q.conditionalProfit,2)}</small><small>Piyasa/koşullu R/R: 1:${fmt(x.p.marketRR,2)} / 1:${fmt(x.p.conditionalRR,2)}</small><small>Destek mesafesi: ${x.p.dist>0?'+':''}${fmt(x.p.dist,2)}%</small><button class="trackBtn ${tracked||active?'tracked':''}" ${tracked||active?'disabled':''} onclick="trackOpportunity('${x.name}',this)">${active?'✅ ALINDI / TAKİPTE':tracked?'✅ TAKİPTE':'👁️ TAKİBE AL'}</button></div>`;
+    return `<div class="cand prep"><b>👁 ${i+1}. ${x.name}/TRY</b><div class="statePill yellow">${plan.label}</div><div class="cp ${x.candidate>=60?'mid':''}">${x.candidate.toFixed(0)}/100</div>${opportunity24HTML(x.opportunity24)}<small>Bu kart işlem sinyali değildir.</small><small>Piyasa/koşullu kâr alanı: %${fmt(q.marketProfit,2)} / %${fmt(q.conditionalProfit,2)}</small><small>Piyasa/koşullu R/R: 1:${fmt(x.p.marketRR,2)} / 1:${fmt(x.p.conditionalRR,2)}</small><small>Destek mesafesi: ${x.p.dist>0?'+':''}${fmt(x.p.dist,2)}%</small><button class="trackBtn ${tracked||active?'tracked':''}" ${tracked||active?'disabled':''} onclick="trackOpportunity('${x.name}',this)">${active?'✅ ALINDI / TAKİPTE':tracked?'✅ TAKİPTE':'👁️ TAKİBE AL'}</button></div>`;
   }).join('');
   $('candidateGrid').innerHTML=winnerCards+(preparationCards?`<div class="prepTitle">👁 HAZIRLIK / TAKİP LİSTESİ — ŞİMDİ AL SİNYALİ DEĞİL</div>${preparationCards}`:'');
 

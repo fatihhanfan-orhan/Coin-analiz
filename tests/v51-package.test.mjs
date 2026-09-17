@@ -133,6 +133,17 @@ test('source syntax and V5.1 active labels',()=>{
   app();edge();new vm.Script(fs.readFileSync(new URL('OneSignalSDKWorker.js',root),'utf8'));new vm.Script(fs.readFileSync(new URL('sw.js',root),'utf8'));
   assert.match(html,/V5\.1 DENETİMLİ KARAR MOTORU/);assert.match(html,/ADAY KALİTE PUANI/);assert.match(worker,/5\.1-QUOTE/);
 });
+test('24h opportunity history counts continuous rises once and requires a 1.5% reset',()=>{
+ const a=app(),w=edge();assert.equal(String(a.opportunityHistory24),String(w.opportunityHistory24));
+ const start=Date.UTC(2026,7,31),bar=(i,low,high,close=high)=>[start+i*900000,low,high,low,close,1,start+(i+1)*900000-1];
+ const rows=[bar(0,100,100),bar(1,100.5,104),bar(2,102,106),bar(3,104.6,105.5),bar(4,104,104.2),bar(5,104,108),bar(6,106,110)];
+ for(const c of [a,w]){
+  const result=c.opportunityHistory24(rows);assert.equal(result.count3,2);assert.equal(result.count5,2);assert.equal(result.items.length,2);assert.ok(result.max>=6);assert.equal(result.method,'Tarihsel yaklaşık');assert.equal(result.costIncluded,false);
+  const withCost=c.opportunityHistory24(rows,.25);assert.ok(withCost.max<result.max);assert.equal(withCost.costIncluded,true);
+ }
+ const x=fixture(),before=a.entryState(x).key;x.opportunity24=a.opportunityHistory24(rows);assert.equal(a.entryState(x).key,before,'informational history must not alter the decision state');
+ assert.match(a.opportunity24HTML(x.opportunity24),/24S FIRSAT: 2× ≥%3 \| 2× ≥%5/);assert.match(a.opportunity24HTML(x.opportunity24),/Tarihsel yaklaşık/);
+});
 test('VIC ghost is purged only by the active pair registry; a transient missing book quote is not a delist',()=>{
  const a=app(),w=edge();
  const tickers=[{symbol:'VIC_TRY',quoteVolume:125000},{symbol:'HEMI_TRY',quoteVolume:250000}],books=[{symbol:'HEMI_TRY',bidPrice:.7,askPrice:.701}];
