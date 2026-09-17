@@ -1,4 +1,20 @@
 import test from 'node:test';
+test('independent 24h list scans beyond Top-3, reuses data, preserves safety and ranks counts',async()=>{
+ const c=app(),names=Array.from({length:40},(_,i)=>'C'+i),tickers=names.concat(['BTC','ETH','BAD']).map(n=>({symbol:n+'TRY',quoteVolume:100000,lastPrice:100})),books=tickers.map(t=>({symbol:t.symbol,bidPrice:100,askPrice:t.symbol==='BADTRY'?110:100.1}));
+ c.tickers=tickers;c.books=books;c.calls=0;
+ run(c,"validTryPairs=()=>new Set(tickers.map(t=>t.symbol.replace(/TRY$/,'')))");
+ run(c,"candidateMetrics=async(name)=>{calls++;return {name,safe:name!=='C39',opportunity24:{count3:name==='C38'?4:1,count5:0,average:3.5,max:4,items:[],method:'Tarihsel yaklaşık'}}};preparationCandidate=x=>({eligible:x.safe});lastScanCandidates={C38:{name:'C38'}}");
+ const before=run(c,'JSON.stringify(lastScanCandidates)');
+ await run(c,'scanHistory24({tickers,books,metrics:[]})');
+ assert.equal(c.calls,40,'whole eligible universe, not 3 or 32');
+ let result=run(c,'history24Results');assert.equal(result.length,39);assert.ok(!result.some(x=>['BTC','ETH','BAD','C39'].includes(x.name)));
+ const view=c.document.getElementById('history24List').innerHTML;
+ assert.ok(view.indexOf('C38/TRY')<view.indexOf('C0/TRY'));assert.match(view,/24S TEKRARLAYAN FIRSAT/);assert.match(view,/Maks.%/);
+ await run(c,'scanHistory24({tickers,books,metrics:[]})');assert.equal(c.calls,40,'same candle uses cache');
+ assert.equal(run(c,'JSON.stringify(lastScanCandidates)'),before);
+ assert.ok(!html.includes('${opportunity24HTML(x.opportunity24)}'));
+ assert.match(html,/void scanHistory24\(\{tickers,books,metrics\}\)/);
+});
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
