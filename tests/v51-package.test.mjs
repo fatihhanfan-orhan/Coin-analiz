@@ -1,15 +1,16 @@
 import test from 'node:test';
 test('independent 24h list scans beyond Top-3, reuses data, preserves safety and ranks counts',async()=>{
- const c=app(),names=Array.from({length:40},(_,i)=>'C'+i),tickers=names.concat(['BTC','ETH','BAD']).map(n=>({symbol:n+'TRY',quoteVolume:100000,lastPrice:100})),books=tickers.map(t=>({symbol:t.symbol,bidPrice:100,askPrice:t.symbol==='BADTRY'?110:100.1}));
+ const c=app(),names=Array.from({length:40},(_,i)=>'C'+i),tickers=names.concat(['BTC','ETH','BAD']).map(n=>({symbol:n+'TRY',quoteVolume:10000000,lastPrice:100})),books=tickers.map(t=>({symbol:t.symbol,bidPrice:100,askPrice:t.symbol==='BADTRY'?110:100.1}));
  c.tickers=tickers;c.books=books;c.calls=0;
  run(c,"validTryPairs=()=>new Set(tickers.map(t=>t.symbol.replace(/TRY$/,'')))");
- run(c,"candidateMetrics=async(name)=>{calls++;return {name,safe:name!=='C39',opportunity24:{count3:name==='C38'?4:1,count5:0,average:3.5,max:4,items:[],method:'Tarihsel yaklaşık'}}};preparationCandidate=x=>({eligible:x.safe});lastScanCandidates={C38:{name:'C38'}}");
+ run(c,"candidateMetrics=async(name)=>{calls++;return {name,safe:name!=='C39',opportunity24:{count3:name==='C38'?4:1,count5:0,average:3.5,max:4,complete:true,rejectedBars:0,medianQuoteVolume:10000,items:[],method:'Tarihsel yaklaşık'}}};preparationCandidate=x=>({eligible:x.safe});lastScanCandidates={C38:{name:'C38'}}");
  const before=run(c,'JSON.stringify(lastScanCandidates)');
  await run(c,'scanHistory24({tickers,books,metrics:[]})');
  assert.equal(c.calls,40,'whole eligible universe, not 3 or 32');
  let result=run(c,'history24Results');assert.equal(result.length,39);assert.ok(!result.some(x=>['BTC','ETH','BAD','C39'].includes(x.name)));
  const view=c.document.getElementById('history24List').innerHTML;
  assert.ok(view.indexOf('C38/TRY')<view.indexOf('C0/TRY'));assert.match(view,/24S TEKRARLAYAN FIRSAT/);assert.match(view,/Maks.%/);
+ assert.equal((view.match(/class="cand"/g)||[]).length,5);
  await run(c,'scanHistory24({tickers,books,metrics:[]})');assert.equal(c.calls,40,'same candle uses cache');
  assert.equal(run(c,'JSON.stringify(lastScanCandidates)'),before);
  assert.ok(!html.includes('${opportunity24HTML(x.opportunity24)}'));
@@ -149,16 +150,36 @@ test('source syntax and V5.1 active labels',()=>{
   app();edge();new vm.Script(fs.readFileSync(new URL('OneSignalSDKWorker.js',root),'utf8'));new vm.Script(fs.readFileSync(new URL('sw.js',root),'utf8'));
   assert.match(html,/V5\.1 DENETİMLİ KARAR MOTORU/);assert.match(html,/ADAY KALİTE PUANI/);assert.match(worker,/5\.1-QUOTE/);
 });
-test('24h opportunity history counts continuous rises once and requires a 1.5% reset',()=>{
+test('24h opportunity history requires close-confirmed support and independent pullbacks',()=>{
  const a=app(),w=edge();assert.equal(String(a.opportunityHistory24),String(w.opportunityHistory24));
- const start=Date.UTC(2026,7,31),bar=(i,low,high,close=high)=>[start+i*900000,low,high,low,close,1,start+(i+1)*900000-1];
- const rows=[bar(0,100,100),bar(1,100.5,104),bar(2,102,106),bar(3,104.6,105.5),bar(4,104,104.2),bar(5,104,108),bar(6,106,110)];
+ const start=Math.floor(Date.now()/900000)*900000-96*900000;
+ const mk=closes=>closes.map((c,i)=>[start+i*900000,c,c*1.001,c*.999,c,1000,start+(i+1)*900000-1,c*1000]);
+ const closes=[...Array(84).fill(100),100,100.5,101,104,108,106,104,104.5,105,108,112,109],rows=mk(closes);
  for(const c of [a,w]){
-  const result=c.opportunityHistory24(rows);assert.equal(result.count3,2);assert.equal(result.count5,2);assert.equal(result.items.length,2);assert.ok(result.max>=6);assert.equal(result.method,'Tarihsel yaklaşık');assert.equal(result.costIncluded,false);
-  const withCost=c.opportunityHistory24(rows,.25);assert.ok(withCost.max<result.max);assert.equal(withCost.costIncluded,true);
+  const result=c.opportunityHistory24(rows);assert.equal(result.count3,2);assert.equal(result.count5,2);assert.equal(result.complete,true);assert.equal(result.method,'Tarihsel yaklaşık');
+  assert.ok(result.items[1].startAt>result.items[0].peakAt);
+  assert.ok(c.opportunityHistory24(rows,.25).max<result.max);
+  const trend=mk(Array.from({length:96},(_,i)=>100+i*.3));
+  assert.equal(c.opportunityHistory24(trend).count3,1,'continuous rise counted once');
+  const wick=mk(Array(96).fill(100));wick.forEach(r=>{r[2]=179;r[3]=90});
+  const rejected=c.opportunityHistory24(wick);assert.equal(rejected.count3,0);assert.equal(rejected.rejectedBars,96,'ONE-shaped wick anomalies cannot fabricate returns');
+  const duplicate=rows.map(r=>[...r]);duplicate[40]=[...duplicate[39]];
+  assert.equal(c.opportunityHistory24(duplicate).complete,false);
+  const zero=rows.map(r=>[...r]);zero[50][5]=0;assert.equal(c.opportunityHistory24(zero).complete,false);
+  const invalid=rows.map(r=>[...r]);invalid[50][2]=1;assert.equal(c.opportunityHistory24(invalid).complete,false);
  }
- const x=fixture(),before=a.entryState(x).key;x.opportunity24=a.opportunityHistory24(rows);assert.equal(a.entryState(x).key,before,'informational history must not alter the decision state');
- assert.match(a.opportunity24HTML(x.opportunity24),/24S FIRSAT: 2× ≥%3 \| 2× ≥%5/);assert.match(a.opportunity24HTML(x.opportunity24),/Tarihsel yaklaşık/);
+ const x=fixture(),before=a.entryState(x).key;x.opportunity24=a.opportunityHistory24(rows);assert.equal(a.entryState(x).key,before);
+ assert.match(a.opportunity24HTML(x.opportunity24),/NET getiri değildir/);
+});
+test('24h Top-5 rewards repeatability, rejects low liquidity and ignores isolated maximum',()=>{
+ const c=app(),mk=(name,values)=>({name,qv:10000000,spread:.1,opportunity24:{complete:true,rejectedBars:0,medianQuoteVolume:10000,count3:values.length,count5:values.filter(v=>v>=5).length,average:values.reduce((a,b)=>a+b,0)/values.length,max:Math.max(...values),items:values.map(maxNet=>({maxNet}))}});
+ const repeat=mk('REPEAT',[4,5,4.5,5]),pump=mk('PUMP',[79]);
+ assert.ok(c.history24Rank(repeat)>c.history24Rank(pump));
+ const low=mk('LOW',[5,5,5,5]);low.qv=999999;assert.equal(c.history24Tradable(low),false);
+ const wide=mk('WIDE',[5,5]);wide.spread=.36;assert.equal(c.history24Tradable(wide),false);
+ const thin=mk('THIN',[5,5]);thin.opportunity24.medianQuoteVolume=4999;assert.equal(c.history24Tradable(thin),false);
+ const rows=[pump,repeat,low,wide,thin,...Array.from({length:6},(_,i)=>mk('OK'+i,[3.5,4]))];
+ const top=c.history24Top5(rows);assert.equal(top.length,5);assert.equal(top[0].name,'REPEAT');assert.ok(!top.some(x=>['LOW','WIDE','THIN'].includes(x.name)));
 });
 test('VIC ghost is purged only by the active pair registry; a transient missing book quote is not a delist',()=>{
  const a=app(),w=edge();

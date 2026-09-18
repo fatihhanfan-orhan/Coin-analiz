@@ -126,7 +126,7 @@ window.CoinOneSignalReady = new Promise((resolve) => {
 </div>
 <div class="card finder sectionBox"><div class="sectionTitle">🔭 OTOMATİK FIRSAT TARAMASI</div><button id="find3" class="finderBtn">🎯 UYGUN FIRSATLARI BUL</button><div id="scanStatus" class="scanstatus">Binance TR TRY piyasasını tarar; yalnız hard-gate koşullarını geçen 0–3 fırsatı gösterir ve otomatik takibe almaz.</div></div>
 <div class="card sectionBox"><h2 class="sectionTitle">✨ BULUNAN FIRSATLAR</h2><div id="candidateGrid" class="candidateGrid"></div><details class="technicalDetails"><summary>TEKNİK AYRINTILAR</summary><div class="method">Hard gate: taze veri, geçerli destek, gerçek D1, en az %3 alan, en az 1:1.30 R/R, kabul edilebilir spread ve likidite.</div></details></div>
-<div class="card sectionBox"><h2 class="sectionTitle">SON 24 SAATİN TRADE FIRSATLARI</h2><button id="history24Scan" onclick="scanHistory24()">24S GEÇMİŞİ TARA</button><div id="history24Status" class="scanstatus">Tarihsel yaklaşık • AL sinyali değildir.</div><div id="history24List"></div></div>
+<div class="card sectionBox"><h2 class="sectionTitle">24S EN İYİ 5 FIRSAT</h2><button id="history24Scan" onclick="scanHistory24()">24S GEÇMİŞİ TARA</button><div id="history24Status" class="scanstatus">Tarihsel yaklaşık • AL sinyali değildir.</div><div id="history24List"></div></div>
 <div class="controls hiddenLegacy" aria-hidden="true">
 <input id="c1" value="" placeholder="Coin 1" autocomplete="off" />
 <input id="c2" value="" placeholder="Coin 2" autocomplete="off" />
@@ -573,24 +573,36 @@ function num(o,...ks){for(const k of ks){const v=+o?.[k];if(Number.isFinite(v))r
 function norm(v,min,max){if(max<=min)return .5;return Math.max(0,Math.min(1,(v-min)/(max-min)))}
 function volatility15(k){const a=k.slice(-16);if(a.length<5)return 0;return a.slice(1).reduce((sum,x)=>sum+((+x[2]-+x[3])/(+x[4]||1))*100,0)/(a.length-1)}
 function opportunityHistory24(rows,costPct=0){
- const bars=(rows||[]).slice(-96).filter(r=>Number(r?.[0])>0&&Number(r?.[2])>0&&Number(r?.[3])>0),cost=Math.max(0,Number(costPct)||0),items=[];
- if(bars.length<2)return{count3:0,count5:0,average:0,max:0,items,method:'Tarihsel yaklaşık',costIncluded:cost>0};
- let start=0,entry=Number(bars[0][3]),peak=Number(bars[0][2]),peakAt=0;
- const add=()=>{const net=(peak/entry-1)*100-cost;if(peakAt>start&&net>=3-1e-9)items.push({startAt:Number(bars[start][0]),peakAt:Number(bars[peakAt][6]||bars[peakAt][0]),entry,peak,maxNet:net});};
- for(let i=1;i<bars.length;i++){
-  const low=Number(bars[i][3]),high=Number(bars[i][2]),gain=(peak/entry-1)*100-cost;
-  if(gain<3&&low<entry){start=i;entry=low;peak=high;peakAt=i;continue;}
-  if(high>peak){peak=high;peakAt=i;}
-  const net=(peak/entry-1)*100-cost,pullback=(peak-low)/peak*100;
-  if(net>=3&&i>peakAt&&pullback>=1.5){add();start=i;entry=low;peak=high;peakAt=i;}
+ const cost=Math.max(0,Number(costPct)||0),items=[],now=Date.now(),step=900000,boundary=Math.floor(now/step)*step,bars=(rows||[]).filter(r=>Number(r?.[0])>=boundary-86400000&&Number(r?.[6])<boundary).slice(-96);
+ let previous=null,start=null,peak=null,trough=null,holds=0,rejected=0,valid=0;const volumes=[];
+ const add=()=>{if(start&&peak&&peak.time>start.time){const net=(peak.price/start.price-1)*100-cost;if(net>=3-1e-9)items.push({startAt:start.time,peakAt:peak.time,entry:start.price,peak:peak.price,maxNet:net});}};
+ const reset=()=>{start=null;peak=null;trough=null;holds=0;};
+ for(const r of bars){
+  const t=Number(r[0]),end=Number(r[6]),o=Number(r[1]),h=Number(r[2]),l=Number(r[3]),c=Number(r[4]),v=Number(r[5]);
+  const malformed=![t,end,o,h,l,c,v].every(Number.isFinite)||Math.min(o,h,l,c)<=0||v<=0||h<Math.max(o,c)||l>Math.min(o,c)||h<l||end-t!==step-1;
+  const anomalous=!malformed&&((h/l-1)>.20&&Math.abs(c/o-1)<.05||previous&&Math.abs(c/previous.close-1)>.20);
+  if(malformed||anomalous||previous&&t<=previous.time){rejected++;add();reset();previous=null;continue;}
+  if(previous&&t-previous.time!==step){add();reset();previous=null;}
+  valid++;const quote=Number(r[7]);volumes.push(Number.isFinite(quote)&&quote>0?quote:v*c);
+  if(start){
+   if(c>peak.price)peak={price:c,time:end};
+   if(c<=peak.price*.985){add();reset();trough=c;}
+  }else{
+   if(trough===null||c<trough){trough=c;holds=0;}
+   else if(previous&&c>previous.close&&l>=previous.low){holds++;}
+   else holds=0;
+   // Two rising, non-lower-low closed candles establish a new support/reversal.
+   if(holds>=2){start={price:c,time:end};peak={...start};}
+  }
+  previous={time:t,close:c,low:l};
  }
  add();
- const values=items.map(x=>x.maxNet),sum=values.reduce((a,b)=>a+b,0);
- return{count3:values.length,count5:values.filter(v=>v>=5-1e-9).length,average:values.length?sum/values.length:0,max:values.length?Math.max(...values):0,items,method:'Tarihsel yaklaşık',costIncluded:cost>0};
+ const values=items.map(x=>x.maxNet),sum=values.reduce((a,b)=>a+b,0),sorted=volumes.sort((a,b)=>a-b);
+ return{count3:values.length,count5:values.filter(v=>v>=5-1e-9).length,average:values.length?sum/values.length:0,max:values.length?Math.max(...values):0,items,method:'Tarihsel yaklaşık',costIncluded:cost>0,validBars:valid,rejectedBars:rejected,complete:valid===96&&rejected===0&&bars.every((r,i)=>!i||Number(r[0])-Number(bars[i-1][0])===step),medianQuoteVolume:sorted.length?sorted[Math.floor(sorted.length/2)]:0};
 }
 function opportunity24HTML(o){
  const x=o||{count3:0,count5:0,average:0,items:[]},time=t=>new Date(Number(t)).toLocaleString('tr-TR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}),rows=(x.items||[]).map(v=>`<small>${time(v.startAt)} → ${time(v.peakAt)} • maks. yaklaşık %${fmt(v.maxNet,2)}</small>`).join('');
- return `<div class="respot"><b>24S FIRSAT: ${x.count3||0}× ≥%3 | ${x.count5||0}× ≥%5 | Ort. %${fmt(x.average||0,1)}</b><details class="technicalDetails"><summary>24 SAATLİK FIRSAT AYRINTISI</summary>${rows||'<small>Son 24 saatte ≥%3 hareket yok.</small>'}<small>${x.method||'Tarihsel yaklaşık'} • 15 dk mum OHLC; tarihsel ASK/BID yok, komisyon/spread dahil değil.</small></details></div>`;
+ return `<div class="respot"><b>24S FIRSAT: ${x.count3||0}× ≥%3 | ${x.count5||0}× ≥%5 | Ort. %${fmt(x.average||0,1)}</b><details class="technicalDetails"><summary>24 SAATLİK FIRSAT AYRINTISI</summary>${rows||'<small>Son 24 saatte ≥%3 hareket yok.</small>'}<small>${x.method||'Tarihsel yaklaşık'} • 15 dk kapanış teyidi; tarihsel ASK/BID yok. ${x.costIncluded?'Belirtilen toplam maliyet düşüldü.':'Komisyon/spread bilinmiyor; NET getiri değildir.'}</small></details></div>`;
 }
 
 function resistancePotential(x){
@@ -639,11 +651,25 @@ function history24Universe(tickers,books){
  const valid=validTryPairs(tickers,books),excluded=new Set(['BTC','ETH','USDT','USDC','FDUSD','DAI','TRY','EUR']),map=new Map(books.map(b=>[String(b.symbol||b.s||''),b]));
  return tickers.filter(t=>{
   const name=baseFromSymbol(String(t.symbol||t.s||'')),b=map.get(name+'TRY')||map.get(name+'_TRY')||{},bid=num(b,'bidPrice','b'),ask=num(b,'askPrice','a'),spread=(ask-bid)/((ask+bid)/2)*100;
-  return valid.has(name)&&!excluded.has(name)&&bid>0&&ask>=bid&&spread<=.35&&num(t,'quoteVolume','q','volumeQuote','quoteAssetVolume')>0;
+  return valid.has(name)&&!excluded.has(name)&&bid>0&&ask>=bid&&spread<=.35&&num(t,'quoteVolume','q','volumeQuote','quoteAssetVolume')>=1000000;
  });
 }
+function history24Tradable(x){
+ const o=x.opportunity24;
+ return !!o&&o.complete&&o.rejectedBars===0&&o.count3>0&&o.medianQuoteVolume>=5000&&Number(x.qv)>=1000000&&Number(x.spread)>=0&&Number(x.spread)<=.35;
+}
+function history24Rank(x){
+ const o=x.opportunity24,cap=(v,n)=>Math.max(0,Math.min(n,Number(v)||0));
+ const repeat=cap(o.count3,6)/6*40,large=cap(o.count5,4)/4*10,profit=cap(o.average,8)/8*15;
+ const liquid=cap(Math.log10(Math.max(1,Number(x.qv)))-6,2)/2*10+cap(o.medianQuoteVolume,50000)/50000*10;
+ const spread=(1-cap(x.spread,.35)/.35)*10,values=o.items.map(v=>v.maxNet),consistency=values.length>1?Math.min(...values)/Math.max(...values)*5:0;
+ return repeat+large+profit+liquid+spread+consistency;
+}
+function history24Top5(rows){
+ return rows.filter(history24Tradable).sort((a,b)=>history24Rank(b)-history24Rank(a)||b.opportunity24.count3-a.opportunity24.count3||a.name.localeCompare(b.name)).slice(0,5);
+}
 function renderHistory24(){
- const live=new Set(Object.keys(lastScanCandidates)),rows=[...history24Results].sort((a,b)=>b.opportunity24.count3-a.opportunity24.count3||b.opportunity24.count5-a.opportunity24.count5||b.opportunity24.average-a.opportunity24.average);
+ const live=new Set(Object.keys(lastScanCandidates)),rows=history24Top5(history24Results);
  $('history24List').innerHTML=rows.map(x=>{const o=x.opportunity24;return '<div class="cand" style="margin-top:6px"><b>'+x.name+'/TRY</b> | '+o.count3+'× ≥%3 | '+o.count5+'× ≥%5 | Ort.%'+fmt(o.average,1)+' | Maks.%'+fmt(o.max,1)+(live.has(x.name)?'<small class="good">24S TEKRARLAYAN FIRSAT</small>':'')+'<details><summary>Fırsat saatleri</summary>'+opportunity24HTML(o)+'</details></div>';}).join('')||'<small>Bu taramada ≥%3 geçmiş fırsat bulunamadı.</small>';
 }
 async function scanHistory24(context){
@@ -660,14 +686,15 @@ async function scanHistory24(context){
      if(!x&&cached?.bucket===bucket)x=cached.data;
      if(!x)x=await candidateMetrics(name,t,bookMap);
      history24Cache.set(name,{bucket,data:x});
-     return preparationCandidate(x).eligible&&x.opportunity24?.count3>0?x:null;
+     const b=bookMap.get(name+'TRY')||bookMap.get(name+'_TRY'),bid=num(b,'bidPrice','b'),ask=num(b,'askPrice','a'),current={...x,qv:num(t,'quoteVolume','q','volumeQuote','quoteAssetVolume'),spread:(ask-bid)/((ask+bid)/2)*100};
+     return preparationCandidate(current).eligible&&history24Tradable(current)?current:null;
     }catch{failed++;return null;}
    }));
    history24Results.push(...batch.filter(Boolean));
    $('history24Status').textContent='24S taraması: '+Math.min(i+3,universe.length)+'/'+universe.length;
   }
   renderHistory24();
-  $('history24Status').textContent='Tarihsel yaklaşık • '+universe.length+' parite tarandı • '+history24Results.length+' sonuç'+(failed?' • '+failed+' veri alınamadı':'')+' • '+new Date().toLocaleTimeString('tr-TR')+' • AL sinyali değildir; komisyon/spread dahil değildir.';
+  $('history24Status').textContent='Tarihsel yaklaşık • '+universe.length+' parite tarandı • '+history24Results.length+' aday filtreleri geçti • En iyi '+Math.min(5,history24Results.length)+' gösteriliyor'+(failed?' • '+failed+' veri alınamadı':'')+' • '+new Date().toLocaleTimeString('tr-TR')+' • AL sinyali değildir; komisyon/spread bilinmiyor, NET getiri değildir.';
  }catch(e){$('history24Status').textContent='24S taraması tamamlanamadı: '+e.message;}
  finally{history24Busy=false;$('history24Scan').disabled=false;}
 }

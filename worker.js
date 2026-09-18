@@ -1466,20 +1466,32 @@ function num(o,...ks){for(const k of ks){const v=+o?.[k];if(Number.isFinite(v))r
 function norm(v,min,max){if(max<=min)return .5;return Math.max(0,Math.min(1,(v-min)/(max-min)));}
 function volatility15(k){const a=k.slice(-16);if(a.length<5)return 0;return a.slice(1).reduce((sum,x)=>sum+((+x[2]-+x[3])/(+x[4]||1))*100,0)/(a.length-1);}
 function opportunityHistory24(rows,costPct=0){
- const bars=(rows||[]).slice(-96).filter(r=>Number(r?.[0])>0&&Number(r?.[2])>0&&Number(r?.[3])>0),cost=Math.max(0,Number(costPct)||0),items=[];
- if(bars.length<2)return{count3:0,count5:0,average:0,max:0,items,method:'Tarihsel yaklaşık',costIncluded:cost>0};
- let start=0,entry=Number(bars[0][3]),peak=Number(bars[0][2]),peakAt=0;
- const add=()=>{const net=(peak/entry-1)*100-cost;if(peakAt>start&&net>=3-1e-9)items.push({startAt:Number(bars[start][0]),peakAt:Number(bars[peakAt][6]||bars[peakAt][0]),entry,peak,maxNet:net});};
- for(let i=1;i<bars.length;i++){
-  const low=Number(bars[i][3]),high=Number(bars[i][2]),gain=(peak/entry-1)*100-cost;
-  if(gain<3&&low<entry){start=i;entry=low;peak=high;peakAt=i;continue;}
-  if(high>peak){peak=high;peakAt=i;}
-  const net=(peak/entry-1)*100-cost,pullback=(peak-low)/peak*100;
-  if(net>=3&&i>peakAt&&pullback>=1.5){add();start=i;entry=low;peak=high;peakAt=i;}
+ const cost=Math.max(0,Number(costPct)||0),items=[],now=Date.now(),step=900000,boundary=Math.floor(now/step)*step,bars=(rows||[]).filter(r=>Number(r?.[0])>=boundary-86400000&&Number(r?.[6])<boundary).slice(-96);
+ let previous=null,start=null,peak=null,trough=null,holds=0,rejected=0,valid=0;const volumes=[];
+ const add=()=>{if(start&&peak&&peak.time>start.time){const net=(peak.price/start.price-1)*100-cost;if(net>=3-1e-9)items.push({startAt:start.time,peakAt:peak.time,entry:start.price,peak:peak.price,maxNet:net});}};
+ const reset=()=>{start=null;peak=null;trough=null;holds=0;};
+ for(const r of bars){
+  const t=Number(r[0]),end=Number(r[6]),o=Number(r[1]),h=Number(r[2]),l=Number(r[3]),c=Number(r[4]),v=Number(r[5]);
+  const malformed=![t,end,o,h,l,c,v].every(Number.isFinite)||Math.min(o,h,l,c)<=0||v<=0||h<Math.max(o,c)||l>Math.min(o,c)||h<l||end-t!==step-1;
+  const anomalous=!malformed&&((h/l-1)>.20&&Math.abs(c/o-1)<.05||previous&&Math.abs(c/previous.close-1)>.20);
+  if(malformed||anomalous||previous&&t<=previous.time){rejected++;add();reset();previous=null;continue;}
+  if(previous&&t-previous.time!==step){add();reset();previous=null;}
+  valid++;const quote=Number(r[7]);volumes.push(Number.isFinite(quote)&&quote>0?quote:v*c);
+  if(start){
+   if(c>peak.price)peak={price:c,time:end};
+   if(c<=peak.price*.985){add();reset();trough=c;}
+  }else{
+   if(trough===null||c<trough){trough=c;holds=0;}
+   else if(previous&&c>previous.close&&l>=previous.low){holds++;}
+   else holds=0;
+   // Two rising, non-lower-low closed candles establish a new support/reversal.
+   if(holds>=2){start={price:c,time:end};peak={...start};}
+  }
+  previous={time:t,close:c,low:l};
  }
  add();
- const values=items.map(x=>x.maxNet),sum=values.reduce((a,b)=>a+b,0);
- return{count3:values.length,count5:values.filter(v=>v>=5-1e-9).length,average:values.length?sum/values.length:0,max:values.length?Math.max(...values):0,items,method:'Tarihsel yaklaşık',costIncluded:cost>0};
+ const values=items.map(x=>x.maxNet),sum=values.reduce((a,b)=>a+b,0),sorted=volumes.sort((a,b)=>a-b);
+ return{count3:values.length,count5:values.filter(v=>v>=5-1e-9).length,average:values.length?sum/values.length:0,max:values.length?Math.max(...values):0,items,method:'Tarihsel yaklaşık',costIncluded:cost>0,validBars:valid,rejectedBars:rejected,complete:valid===96&&rejected===0&&bars.every((r,i)=>!i||Number(r[0])-Number(bars[i-1][0])===step),medianQuoteVolume:sorted.length?sorted[Math.floor(sorted.length/2)]:0};
 }
 function atr(k,p=14){const tr=[];for(let i=1;i<k.length;i++){const hi=+k[i][2],lo=+k[i][3],pc=+k[i-1][4];tr.push(Math.max(hi-lo,Math.abs(hi-pc),Math.abs(lo-pc)));}return tr.slice(-p).reduce((a,b)=>a+b,0)/Math.max(1,Math.min(p,tr.length));}
 function swingLevels(k,type='low',look=3,limit=90){const a=k.slice(-limit),out=[];for(let i=look;i<a.length-look;i++){const v=+(type==='low'?a[i][3]:a[i][2]);let ok=true;for(let j=i-look;j<=i+look;j++){if(j===i)continue;const q=+(type==='low'?a[j][3]:a[j][2]);if(type==='low'?(q<v):(q>v)){ok=false;break;}}if(ok)out.push(v);}return out;}
