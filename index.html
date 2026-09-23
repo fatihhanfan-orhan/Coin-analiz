@@ -698,6 +698,48 @@ async function scanHistory24(context){
  }catch(e){$('history24Status').textContent='24S taraması tamamlanamadı: '+e.message;}
  finally{history24Busy=false;$('history24Scan').disabled=false;}
 }
+// Finder-only assessment: shared watch/history/push decision functions remain unchanged.
+function finderLiquidityContext(tickers){
+ const values=tickers.map(t=>num(t,'quoteVolume','q','volumeQuote','quoteAssetVolume')).filter(v=>Number.isFinite(v)&&v>0).sort((a,b)=>a-b);
+ const at=q=>values[Math.floor((values.length-1)*q)]||0;
+ return {median:at(.5),floor:Math.min(at(.1),at(.5)/10)};
+}
+function assessProfitFinder(x,liquidity){
+ const p=x.p||{},m=x.m||{},r=p.recovery||{},f=moneyFlowModel(x),rp=x.rpot||{},clamp=(v,lo,hi)=>Math.max(lo,Math.min(hi,Number.isFinite(v)?v:lo));
+ // candidateMetrics already computed the technical buy score and resistance potential.
+ const base=entryState({...x,s:{buy:x.buy}}),market=Number(p.marketEntry),limit=Number(p.conditionalEntry),stop=Number(p.stop);
+ const conditional=base.key!=='CONFIRMED'&&p.supportSource==='HORIZONTAL'&&limit>stop&&limit<market&&Number(p.conditionalRR)>=1.30;
+ const kind=conditional?'CONDITIONAL':'MARKET',entry=conditional?limit:market,spread=Number(x.spread);
+ const levels=[...(p.resistances||[]),p.interimTarget,p.mainTarget].map(Number).filter(v=>Number.isFinite(v)&&v>entry);
+ const target=levels.length?Math.min(...levels):NaN,gross=entry>0?(target/entry-1)*100:NaN;
+ const confidence=clamp((Number(rp.reach)*.55+Number(rp.support)*.25+Number(rp.liquidity)*.20)/10,0,1);
+ // A conservative area estimate, not a probability or guaranteed net profit. Fees unknown.
+ const profit=Math.max(0,gross*confidence-spread),risk=entry>stop&&stop>0?(entry-stop)/entry*100+spread:NaN,rr=risk>0?profit/risk:NaN;
+ // Reuse tradePlan's support-zone, ATR stop buffer and allowed near-entry envelope.
+ const normalRisk=entry>0?((Number(p.zoneHigh)-Number(p.zoneLow))+Math.max(Number(p.atr)*.65,Number(p.support)*.0035)+Number(p.atr)*.35)/entry*100+spread:NaN;
+ const volume=Number(x.vRatio),qv=Number(x.qv),liquid=liquidity.median>0&&qv>0?clamp(1+Math.log10(qv/liquidity.median),0,1):0;
+ const hold=!r.confirmedSupportBreak&&!r.fourHourFalling&&(r.higherLow||r.base||r.reclaim),flowReady=f.status==='REAL'&&f.m15>0&&(f.m30>0||f.h1>0)&&!f.distribution;
+ // The existing good-quality boundary (75), MA5 confirmation and 7 reversal confirmations.
+ const confirmed=hold&&flowReady&&volume>=1&&Number(r.confirmations)>=7&&p.supportSource==='HORIZONTAL';
+ const profitPoints=profit<3?0:profit<5?7+(profit-3)*5.5:profit<7?18+(profit-5)*3:profit<10?24+(profit-7)*2:30+clamp((profit-10)/5,0,1)*5;
+ const history=x.opportunity24||{},capacity=history.complete&&Number(history.count3)>0?clamp(Number(history.max)/15,0,1)*clamp(Number(history.count3)/3,0,1)*5:0;
+ const components={profit:profitPoints,riskReward:clamp((rr-1.30)/(3-1.30),0,1)*25,liquidity:liquid*10+clamp((.35-spread)/.35,0,1)*5,volume:clamp((volume-.75)/(1.8-.75),0,1)*10,reversal:(p.supportSource==='HORIZONTAL'?3:0)+(hold?2:0)+(flowReady?3:0)+(Number(r.confirmations)>=7?2:0),capacity};
+ const liquidityPenalty=(1-liquid)*10,score=clamp(Object.values(components).reduce((sum,v)=>sum+v,0)-liquidityPenalty,0,100);
+ let reason=base.hard?base.label:base.key==='PULLBACK'?'PULLBACK BEKLE — MEVCUT FİYATTAN ALMA':!Number.isFinite(profit)||profit<3?'GERÇEKÇİ KÂR ALANI %3 ALTINDA':!Number.isFinite(rr)||rr<1.30?'GERÇEKÇİ R/R 1.30 ALTINDA':!Number.isFinite(normalRisk)||risk>normalRisk+1e-9?'STOP RİSKİ DESTEK BÖLGESİ SINIRINI AŞIYOR':!(qv>0)||qv<liquidity.floor?'24S LİKİDİTE ÇOK DÜŞÜK':'';
+ if(!reason&&!confirmed)reason='DÖNÜŞ / HACİM / PARA AKIŞI TEYİDİ YETERSİZ';
+ if(!reason&&score<75)reason='ADAY KALİTESİ 75/100 ALTINDA';
+ const ready=!reason&&['CONFIRMED','CONDITIONAL','LIMIT_WAIT','EARLY'].includes(base.key);
+ const marketReady=ready&&kind==='MARKET'&&base.key==='CONFIRMED';
+ const eligible=ready&&(marketReady||conditional);
+ const state=base.hard||base.key==='PULLBACK'?base:eligible?{key:marketReady?'CONFIRMED':'CONDITIONAL',label:marketReady?'GİRİŞ UYGUN':'KOŞULLU GİRİŞ HAZIR',tone:marketReady?'green':'yellow'}:{key:'LIMIT_WAIT',label:'LİMİT BÖLGESİNDE — TEYİT BEKLE',tone:'yellow'};
+ return {kind,entry,target,gross,confidence,profit,risk,rr,normalRisk,components,liquidityPenalty,score,eligible,state,reason:reason||(!eligible?'GİRİŞ TEYİDİ BEKLENİYOR':''),band:profit>=10?'ÇOK GÜÇLÜ':profit>=7?'GÜÇLÜ':profit>=5?'İYİ':profit>=3?'ALT KALİTE REFERANSI':'YETERSİZ'};
+}
+function compareProfitFinder(a,b){
+ const x=a.finder,y=b.finder;
+ // 5%+ first within the same safety/quality gate; score includes attainable area and risk.
+ return Number(y.profit>=5)-Number(x.profit>=5)||y.score-x.score||y.profit-x.profit||y.rr-x.rr||a.name.localeCompare(b.name);
+}
+
 async function findDaily3(opts={}){
  const previousTracked=loadWatch();
  const btn=$('find3');btn.disabled=true;btn.textContent='⏳ Destek Fırsatları Taranıyor…';$('scanStatus').textContent='24 saatlik hacim ve likidite adayları alınıyor…';$('candidateGrid').innerHTML='';
@@ -709,29 +751,10 @@ async function findDaily3(opts={}){
   const top=tryTicks;if(!top.length)throw new Error('TRY piyasa listesi alınamadı.');$('scanStatus').textContent=`Uygun TRY evreninin tamamı: ${top.length} parite taranıyor…`;
   const metrics=[];for(let i=0;i<top.length;i+=3){const batch=top.slice(i,i+3);const got=await Promise.all(batch.map(async t=>{const n=baseFromSymbol(String(t.symbol||t.s||''));try{return await candidateMetrics(n,t,bookMap)}catch{return null}}));metrics.push(...got.filter(Boolean));$('scanStatus').textContent=`Destek taraması: ${Math.min(i+3,top.length)}/${top.length}…`;await new Promise(r=>setTimeout(r,120))}
   if(metrics.length===0)throw new Error('Yeterli coin verisi alınamadı.');
-  const logs=metrics.map(x=>Math.log10(Math.max(1,x.qv))),lmin=Math.min(...logs),lmax=Math.max(...logs);
-  for(const x of metrics){
-   const d=Number(x.p?.dist??99), absd=Math.abs(d), inZone=!!x.p?.near, bounce=!!x.p?.bounce;
-   let proximity=0;if(bounce)proximity=38;else if(inZone)proximity=33;else if(d>=0&&d<=0.75)proximity=30;else if(d>0&&d<=1.5)proximity=25;else if(d>1.5&&d<=2.5)proximity=18;else if(d>2.5&&d<=4)proximity=9;else if(d<0&&absd<=1)proximity=13;
-   const reversal=(bounce?10:0)+(x.m.hist>x.m.prevHist?4:0)+(x.m.macd>x.m.signal?3:0)+(x.m.price>x.m.ema9?3:0);
-   const volume=norm(Math.min(x.vRatio,2.5),.75,1.8)*12;
-   const trend=((x.m.ema9>x.m.ema21?1:0)+(x.h.ema9>x.h.ema21?1:0))*4;
-   const rsi=(x.m.rsi>=42&&x.m.rsi<=66)?7:(x.m.rsi>=35&&x.m.rsi<72?4:0);
-   const liquid=(1-norm(Math.min(x.spread,.8),.05,.5))*8;
-   const qvol=norm(Math.log10(Math.max(1,x.qv)),lmin,lmax)*2;
-   const profitPts=(x.rpot?.profitScore||0)*3.0;
-   const supportPts=Math.min(10,(proximity+reversal)*.5);
-   const reachPts2=(x.rpot?.reach||0)*2.0;
-   const momentumPts=Math.min(15,volume+trend+rsi);
-   const liquidPts=Math.min(5,liquid+qvol);
-   const chasePenalty=d>3?Math.min(30,(d-3)*5):0, belowPenalty=d<-1.5?10:0, overheat=x.m.rsi>72?8:0;
-   const recovery=x.p?.recovery||{},risk=finderRiskFlags(x),recoveryBonus=recovery.state==='TOPARLANMA TEYİDİ'?Math.min(4,Number(recovery.confirmations||0)*.45):0,dipNearBonus=risk.severeDrop&&Math.abs(d)<=1.5&&(recovery.higherLow||recovery.base||recovery.reclaim)?8:0,recoveryPenalty=recovery.newLow?20:0,weakFlowPenalty=risk.weakRecovery?12:0,weakVolumePenalty=x.vRatio<.8?10:0,fastRisePenalty=risk.chased?18:0,theoreticalBonus=Math.min(2,Math.max(0,Number(recovery.maxRecoveryPct||0))*.03);
-   x.candidate=Math.max(0,Math.min(100,finderEntryQuality(x).historicalScore+profitPts+reachPts2+supportPts+momentumPts+liquidPts+recoveryBonus+dipNearBonus+theoreticalBonus-chasePenalty-belowPenalty-overheat-recoveryPenalty-weakFlowPenalty-weakVolumePenalty-fastRisePenalty-(finderEntryQuality(x).historicDistance>=12?30:0)));
-   if(x.vRatio<.8&&!bounce)x.candidate=Math.min(x.candidate,74);
-  }
-  for(const x of metrics)x.scanState=entryState({...x,s:score(x.m,x.h,x.p)});
-  const safeMetrics=metrics.filter(x=>!x.scanState.hard&&validPairs.has(x.name)),qualityMetrics=safeMetrics.filter(x=>!finderEntryQuality(x).reason&&!['WATCH','PULLBACK'].includes(x.scanState.key));
-  qualityMetrics.sort(compareFinderQuality);
+  const liquidity=finderLiquidityContext(tryTicks);
+  for(const x of metrics){x.finder=assessProfitFinder(x,liquidity);x.candidate=x.finder.score;x.scanState=x.finder.state;}
+  const qualityMetrics=metrics.filter(x=>validPairs.has(x.name)&&x.finder.eligible);
+  qualityMetrics.sort(compareProfitFinder);
   const winners=qualityMetrics.slice(0,3),winnerNames=new Set(winners.map(x=>x.name));
   const preparation=metrics.filter(x=>validPairs.has(x.name)&&!winnerNames.has(x.name)&&preparationCandidate(x).eligible).sort(compareFinderQuality).slice(0,3);
 
@@ -745,11 +768,11 @@ async function findDaily3(opts={}){
     const ok=true;
     const tracked=loadWatch().includes(x.name),st=x.scanState;
     const rec=x.p.recovery||{},flow=moneyFlowModel(x),active=loadPositions().some(p=>p.name===x.name),targetLine=`Ara ${fmt(x.p.interimTarget,6)} • Ana D1 ${fmt(x.p.mainTarget,6)}`;
-    return `<div class="cand"><b>${st.key==='CONFIRMED'?'🟢':st.key==='CONDITIONAL'||st.key==='EARLY'||st.key==='LIMIT_WAIT'?'🟡':'👁'} ${st.label} • ${i+1}. ${x.name}/TRY</b><div class="statePill ${st.tone}">${active?'ALINDI / TAKİPTE':st.label}</div><div class="cp ${x.candidate>=75?'good':x.candidate>=60?'mid':''}">${x.candidate.toFixed(0)}/100</div><small>Piyasa ${fmt(x.p.marketEntry,6)} • koşullu ${fmt(x.p.conditionalEntry,6)} • uzaklık %${fmt((x.p.marketEntry/x.p.conditionalEntry-1)*100,2)}</small><small>Piyasa R/R 1:${fmt(x.p.marketRR,2)} • koşullu R/R 1:${fmt(x.p.conditionalRR,2)}</small><small>Ağırlıklı alan tahmini (komisyon hariç) yaklaşık +%${fmt(x.rpot.expectedEdge,2)} • brüt koşullu giriş→Ana D1 +%${fmt(x.rpot.upside1,2)}</small>${x.rpot.upside1<3?'<small class="bad">⚠️ KÂR ALANI DÜŞÜK — %3 kalite referansının altında (eleme değildir)</small>':''}<small>Girişe göre kâr sınıfı: ${finderEntryQuality(x,st.key==='CONDITIONAL'?'CONDITIONAL':'MARKET').band}</small><small>${targetLine}</small><small>Destek mesafesi: ${x.p.dist>0?'+':''}${x.p.dist.toFixed(2)}%</small><small>15dk hacim: ${x.vRatio.toFixed(2)}× MA5</small><small>Spread: ${x.spread.toFixed(3)}%</small><small>24s TRY hacmi: ${fmt(x.qv,0)}</small><small>Para akışı 15dk/30dk/1s: ${flow.status==='REAL'?[flow.m15,flow.m30,flow.h1].map(v=>(v>=0?'+':'')+fmt(v,0)).join(' / '):'VERİ YOK'}${flow.distribution?' • DAĞITIM RİSKİ':''}</small><div class="respot"><b>3/5/7 GÜNLÜK DÖNÜŞ + TOPARLANMA</b><strong class="${rec.state==='TOPARLANMA TEYİDİ'?'potgood':rec.confirmedSupportBreak?'potbad':'potmid'}">${rec.state||'VERİ YOK'}</strong><small>Değişim 3g ${fmt(rec.drops?.d3,2)}% • 5g ${fmt(rec.drops?.d5,2)}% • 7g ${fmt(rec.drops?.d7,2)}%</small><small>Maksimum toparlanma alanı ≈ +%${fmt(rec.maxRecoveryPct,2)}</small></div><button class="trackBtn ${tracked||active?'tracked':''}" ${tracked||active?'disabled':''} onclick="trackOpportunity('${x.name}',this)">${active?'✅ ALINDI / TAKİPTE':tracked?'✅ TAKİPTE':'👁️ TAKİBE AL'}</button></div>`;
+    return `<div class="cand"><b>${st.key==='CONFIRMED'?'🟢':st.key==='CONDITIONAL'||st.key==='EARLY'||st.key==='LIMIT_WAIT'?'🟡':'👁'} ${st.label} • ${i+1}. ${x.name}/TRY</b><div class="statePill ${st.tone}">${active?'ALINDI / TAKİPTE':st.label}</div><div class="cp ${x.candidate>=75?'good':x.candidate>=60?'mid':''}">${x.candidate.toFixed(0)}/100</div><small>Piyasa ${fmt(x.p.marketEntry,6)} • koşullu ${fmt(x.p.conditionalEntry,6)} • uzaklık %${fmt((x.p.marketEntry/x.p.conditionalEntry-1)*100,2)}</small><small>Piyasa R/R 1:${fmt(x.p.marketRR,2)} • koşullu R/R 1:${fmt(x.p.conditionalRR,2)}</small><small>${x.finder.kind==='CONDITIONAL'?'Koşullu':'Piyasa'} giriş ${fmt(x.finder.entry,6)} → ilk gerçek direnç ${fmt(x.finder.target,6)} • gerçekçi alan tahmini +%${fmt(x.finder.profit,2)} (spread düşülmüş, komisyon hariç)</small><small>Stop riski %${fmt(x.finder.risk,2)} • gerçekçi R/R 1:${fmt(x.finder.rr,2)} • ${x.finder.band}</small><small>${targetLine}</small><small>Destek mesafesi: ${x.p.dist>0?'+':''}${x.p.dist.toFixed(2)}%</small><small>15dk hacim: ${x.vRatio.toFixed(2)}× MA5</small><small>Spread: ${x.spread.toFixed(3)}%</small><small>24s TRY hacmi: ${fmt(x.qv,0)}</small><small>Para akışı 15dk/30dk/1s: ${flow.status==='REAL'?[flow.m15,flow.m30,flow.h1].map(v=>(v>=0?'+':'')+fmt(v,0)).join(' / '):'VERİ YOK'}${flow.distribution?' • DAĞITIM RİSKİ':''}</small><div class="respot"><b>3/5/7 GÜNLÜK DÖNÜŞ + TOPARLANMA</b><strong class="${rec.state==='TOPARLANMA TEYİDİ'?'potgood':rec.confirmedSupportBreak?'potbad':'potmid'}">${rec.state||'VERİ YOK'}</strong><small>Değişim 3g ${fmt(rec.drops?.d3,2)}% • 5g ${fmt(rec.drops?.d5,2)}% • 7g ${fmt(rec.drops?.d7,2)}%</small><small>Maksimum toparlanma alanı ≈ +%${fmt(rec.maxRecoveryPct,2)}</small></div><button class="trackBtn ${tracked||active?'tracked':''}" ${tracked||active?'disabled':''} onclick="trackOpportunity('${x.name}',this)">${active?'✅ ALINDI / TAKİPTE':tracked?'✅ TAKİPTE':'👁️ TAKİBE AL'}</button></div>`;
   }).join('');
   const preparationCards=preparation.map((x,i)=>{
     const plan=preparationCandidate(x),q=finderEntryQuality(x),tracked=loadWatch().includes(x.name),active=loadPositions().some(p=>p.name===x.name);
-    return `<div class="cand prep"><b>👁 ${i+1}. ${x.name}/TRY</b><div class="statePill yellow">${plan.label}</div><div class="cp ${x.candidate>=60?'mid':''}">${x.candidate.toFixed(0)}/100</div><small>Bu kart işlem sinyali değildir.</small><small>Piyasa/koşullu kâr alanı: %${fmt(q.marketProfit,2)} / %${fmt(q.conditionalProfit,2)}</small><small>Piyasa/koşullu R/R: 1:${fmt(x.p.marketRR,2)} / 1:${fmt(x.p.conditionalRR,2)}</small><small>Destek mesafesi: ${x.p.dist>0?'+':''}${fmt(x.p.dist,2)}%</small><button class="trackBtn ${tracked||active?'tracked':''}" ${tracked||active?'disabled':''} onclick="trackOpportunity('${x.name}',this)">${active?'✅ ALINDI / TAKİPTE':tracked?'✅ TAKİPTE':'👁️ TAKİBE AL'}</button></div>`;
+    return `<div class="cand prep"><b>👁 ${i+1}. ${x.name}/TRY</b><div class="statePill yellow">${x.finder?.reason||plan.label}</div><div class="cp ${x.candidate>=60?'mid':''}">${x.candidate.toFixed(0)}/100</div><small>Bu kart işlem sinyali değildir.</small><small>Piyasa/koşullu kâr alanı: %${fmt(q.marketProfit,2)} / %${fmt(q.conditionalProfit,2)}</small><small>Piyasa/koşullu R/R: 1:${fmt(x.p.marketRR,2)} / 1:${fmt(x.p.conditionalRR,2)}</small><small>Destek mesafesi: ${x.p.dist>0?'+':''}${fmt(x.p.dist,2)}%</small><button class="trackBtn ${tracked||active?'tracked':''}" ${tracked||active?'disabled':''} onclick="trackOpportunity('${x.name}',this)">${active?'✅ ALINDI / TAKİPTE':tracked?'✅ TAKİPTE':'👁️ TAKİBE AL'}</button></div>`;
   }).join('');
   $('candidateGrid').innerHTML=winnerCards+(preparationCards?`<div class="prepTitle">👁 HAZIRLIK / TAKİP LİSTESİ — ŞİMDİ AL SİNYALİ DEĞİL</div>${preparationCards}`:'');
 
@@ -760,7 +783,7 @@ async function findDaily3(opts={}){
 
   if(!opts.auto4h){
     $('scanStatus').textContent=goodCount===3
-      ?'✅ Tarama tamamlandı • 3 piyasa girişi uygun • tarihsel dip ve giriş kalitesine göre sıralandı.'
+      ?'✅ Tarama tamamlandı • 3 piyasa girişi uygun • gerçekçi kâr ve risk/kazanç kalitesine göre sıralandı.'
       :winners.length===0?(preparation.length?`ŞU ANDA UYGUN FIRSAT YOK • 0 işlem yapılabilir • ${preparation.length} hazırlık/takip adayı.`:'ŞU ANDA UYGUN FIRSAT YOK'):`🟡 Tarama tamamlandı • ${goodCount} piyasa girişi uygun • ${winners.length} koşullu/erken teyit bekleyen aday.`;
   }else{
     const body=winners.map((x,i)=>`${i+1}. ${x.name}/TRY • koşullu→Ana D1 brüt +%${fmt(x.rpot?.upside1,2)} • fırsat ${fmt(x.candidate,0)}/100`).join(' • ');
