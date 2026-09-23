@@ -706,7 +706,7 @@ async function findDaily3(opts={}){
   const bookMap=new Map(books.map(x=>[String(x.symbol||x.s||''),x])),validPairs=validTryPairs(tickers,books);pairRegistry={checkedAt:Date.now(),valid:validPairs};await purgeGhostPairs();const excluded=new Set(['BTC','ETH','USDT','USDC','FDUSD','DAI','TRY','EUR']);
   let tryTicks=tickers.filter(t=>{const sym=String(t.symbol||t.s||''),base=baseFromSymbol(sym);return validPairs.has(base)&&!excluded.has(base)});
   tryTicks.sort((a,b)=>num(b,'quoteVolume','q','volumeQuote','quoteAssetVolume')-num(a,'quoteVolume','q','volumeQuote','quoteAssetVolume'));
-  const top=tryTicks.slice(0,32);if(!top.length)throw new Error('TRY piyasa listesi alınamadı.');$('scanStatus').textContent=`İlk ${top.length} yüksek hacimli TRY paritesi destek yakınlığı için taranıyor…`;
+  const top=tryTicks;if(!top.length)throw new Error('TRY piyasa listesi alınamadı.');$('scanStatus').textContent=`Uygun TRY evreninin tamamı: ${top.length} parite taranıyor…`;
   const metrics=[];for(let i=0;i<top.length;i+=3){const batch=top.slice(i,i+3);const got=await Promise.all(batch.map(async t=>{const n=baseFromSymbol(String(t.symbol||t.s||''));try{return await candidateMetrics(n,t,bookMap)}catch{return null}}));metrics.push(...got.filter(Boolean));$('scanStatus').textContent=`Destek taraması: ${Math.min(i+3,top.length)}/${top.length}…`;await new Promise(r=>setTimeout(r,120))}
   if(metrics.length===0)throw new Error('Yeterli coin verisi alınamadı.');
   const logs=metrics.map(x=>Math.log10(Math.max(1,x.qv))),lmin=Math.min(...logs),lmax=Math.max(...logs);
