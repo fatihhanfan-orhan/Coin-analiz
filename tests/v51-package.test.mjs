@@ -348,22 +348,16 @@ test('year request and short-listing history: no fabricated full-year coverage',
  assert.equal((await w.klines('NIL','1d')).length,8);assert.match(run(w,'requested'),/limit=366/);
  assert.equal(a.recoveryHistory([candle(Date.UTC(2026,1,1))],[],[],rows,100).context.year.complete,false);
 });
-test('Finder keeps sub-3% plans as quality warnings and returns zero only for hard failures',async()=>{
+test('Finder returns only 0–3 quality-confirmed candidates and rejects sub-3% or blocked profit',async()=>{
  const a=app();a.setTimeout=callback=>{queueMicrotask(callback);return 1};
- const candidates=['AAA','BBB','CCC','BAD'].map((name,i)=>{
-  const x=fixture();x.name=name;x.qv=100000-i;x.m.ema9=100;x.m.ema21=99;x.m.macd=2;x.m.signal=1;x.m.vol=120;x.m.vma5=100;x.h.ema9=100;x.h.ema21=99;
-  x.p.interimTarget=100.5;x.p.mainTarget=106;x.rpot={upside1:.66,expectedEdge:.2,profitScore:0,reach:7};return x;
- });
- candidates[1].p.conditionalEntry=100;candidates[1].p.marketRR=1.3;
- candidates[2].p.near=true;
- candidates[3].spread=1;
- a.candidates=candidates;
- run(a,"purgeGhostPairs=async()=>{};all24hTickers=async()=>candidates.map(x=>({symbol:x.name+'TRY',quoteVolume:x.qv}));allBookTickers=async()=>candidates.map(x=>({symbol:x.name+'TRY',bidPrice:99.9,askPrice:100}));candidateMetrics=async n=>candidates.find(x=>x.name===n)");
- let winners=await a.findDaily3();assert.equal(winners.length,3);assert.ok(winners.every(x=>x.name!=='BAD'));assert.ok(winners.every(x=>x.scanState.key!=='CONFIRMED'));
+ const candidates=['AAA','BBB','CCC','BAD'].map(name=>{const x=profitFixture();x.name=name;return x;});
+ candidates[3].spread=1;a.candidates=candidates;
+ run(a,"purgeGhostPairs=async()=>{};all24hTickers=async()=>candidates.map(x=>({symbol:x.name+'TRY',quoteVolume:x.qv}));allBookTickers=async()=>candidates.map(x=>({symbol:x.name+'TRY',bidPrice:99.9,askPrice:100}));candidateMetrics=async n=>candidates.find(x=>x.name===n);scanHistory24=async()=>{}");
+ let winners=await a.findDaily3();assert.equal(winners.length,3);assert.ok(winners.every(x=>x.name!=='BAD'&&x.candidate>=75));
  a.candidates=candidates.slice(0,2);winners=await a.findDaily3();assert.equal(winners.length,2);
- a.candidates=[candidates[0]];winners=await a.findDaily3();assert.equal(winners.length,1);assert.equal(winners[0].name,'AAA');
- candidates[0].p.mainTarget=101;winners=await a.findDaily3();assert.equal(winners.length,1);assert.equal(a.finderEntryQuality(winners[0]).band,'DÜŞÜK — KALİTE UYARISI');
- candidates[0].p.marketRR=1.29;candidates[0].p.conditionalRR=1.29;winners=await a.findDaily3();assert.equal(winners.length,0);
+ a.candidates=[candidates[0]];winners=await a.findDaily3();assert.equal(winners.length,1);
+ candidates[0].p.interimTarget=101;winners=await a.findDaily3();assert.equal(winners.length,0,'distant D1 cannot hide a close resistance');
+ candidates[0].p.interimTarget=106;candidates[0].p.marketRR=1.29;candidates[0].p.conditionalRR=1.29;winners=await a.findDaily3();assert.equal(winners.length,0);
  assert.match(a.document.getElementById('scanStatus').textContent,/ŞU ANDA UYGUN FIRSAT YOK/);
 });
 test('notification control shows progress, bounded checks; registration is not delivery evidence',async()=>{
@@ -462,4 +456,57 @@ test('real HEMI August 31 prefix replay: weekly rise is not erased by a small pu
   summary[state]=(summary[state]||0)+1;if(bar[4]>=.7)late++;checked++;
  }
  assert.ok(checked>=90);assert.ok(late>0);console.log('HEMI real replay:',JSON.stringify({checked,late,states:summary,lastChanges:a.p.recovery.drops,weekLow:a.p.recovery.history.week.low}));
+});
+
+// All new rules are scoped to findDaily3; legacy watch/Worker tests above remain unchanged.
+function profitFixture(){
+ const x=fixture();x.qv=20000000;x.vRatio=1.8;x.buy=8;x.m.vol=180;x.m.vma5=100;
+ Object.assign(x.p,{marketEntry:100,conditionalEntry:99.5,stop:99,interimTarget:106,mainTarget:115,resistances:[106,115],marketRR:15,conditionalRR:31,near:true,bounce:true,support:99,zoneLow:98.5,zoneHigh:99.5,atr:2});
+ Object.assign(x.p.recovery,{confirmations:8,base:true,fourHourHold:true});
+ x.rpot={reach:10,support:10,liquidity:10,upside1:15,expectedEdge:15};return x;
+}
+const finderLiquid={median:20000000,floor:2000000};
+test('Finder score, label and selected entry agree; low scores cannot be ready',()=>{
+ const a=app(),x=profitFixture(),q=a.assessProfitFinder(x,finderLiquid);
+ assert.equal(q.eligible,true);assert.equal(q.state.key,'CONFIRMED');assert.equal(q.kind,'MARKET');
+ assert.equal(q.entry,100);assert.equal(q.target,106);assert.ok(Math.abs(q.profit-5.9)<1e-9);
+ assert.ok(q.score>=75);assert.ok(Math.abs(q.score-(Object.values(q.components).reduce((s,v)=>s+v,0)-q.liquidityPenalty))<1e-9);
+ x.rpot.reach=0;x.rpot.support=0;x.rpot.liquidity=0;const low=a.assessProfitFinder(x,finderLiquid);
+ assert.equal(low.eligible,false);assert.notEqual(low.state.key,'CONFIRMED');assert.ok(low.score<75);
+});
+test('Finder uses the first real resistance and chosen entry; 0.7–1% cannot reach Top-3',()=>{
+ const a=app();for(const target of [100.7,101]){const x=profitFixture();x.p.interimTarget=target;x.p.mainTarget=130;x.p.resistances=[target,130];assert.equal(a.assessProfitFinder(x,finderLiquid).eligible,false);}
+ const x=profitFixture();x.p.bounce=false;const q=a.assessProfitFinder(x,finderLiquid);assert.equal(q.kind,'CONDITIONAL');assert.equal(q.entry,99.5);assert.ok(q.profit>5.9);assert.equal(q.state.key,'CONDITIONAL');
+ x.p.conditionalEntry=100;x.p.bounce=true;assert.equal(a.assessProfitFinder(x,finderLiquid).kind,'MARKET');
+});
+test('Finder prioritizes 5, 7, 10, 15% reachable profit with controlled risk, not a distant D1',()=>{
+ const a=app(),xs=[5,7,10,15].map(profit=>{const x=profitFixture();x.name='P'+profit;x.p.interimTarget=100+profit+.1;x.p.mainTarget=140;x.p.resistances=[x.p.interimTarget,140];x.finder=a.assessProfitFinder(x,finderLiquid);return x;});
+ assert.ok(xs.every(x=>x.finder.eligible));for(let i=1;i<xs.length;i++)assert.ok(xs[i].finder.score>xs[i-1].finder.score);
+ assert.deepEqual(xs.sort(a.compareProfitFinder).map(x=>x.name),['P15','P10','P7','P5']);
+ const risky=profitFixture();risky.p.stop=90;risky.p.interimTarget=130;risky.p.resistances=[130];risky.p.mainTarget=140;risky.finder=a.assessProfitFinder(risky,finderLiquid);assert.equal(risky.finder.eligible,false);assert.match(risky.finder.reason,/STOP RİSKİ/);
+ const rr=profitFixture();rr.p.stop=97.5;rr.p.interimTarget=104;rr.p.resistances=[104];rr.rpot.reach=8;rr.rpot.support=8;rr.rpot.liquidity=8;assert.match(a.assessProfitFinder(rr,finderLiquid).reason,/R\/R/);
+});
+test('Finder liquidity follows TRY distribution and continuously penalizes volume and spread',()=>{
+ const a=app(),tickers=[100,1000000,3000000,10000000,20000000,30000000,50000000,100000000,200000000,500000000].map(quoteVolume=>({quoteVolume}));
+ const context=a.finderLiquidityContext(tickers);assert.equal(context.median,20000000);assert.equal(context.floor,100);
+ const x=profitFixture(),high=a.assessProfitFinder(x,finderLiquid);x.qv=5000000;const low=a.assessProfitFinder(x,finderLiquid);assert.ok(high.score>low.score);assert.ok(low.liquidityPenalty>0);
+ x.qv=1000000;assert.match(a.assessProfitFinder(x,finderLiquid).reason,/LİKİDİTE/);
+ x.qv=20000000;x.spread=.3;assert.ok(a.assessProfitFinder(x,finderLiquid).score<high.score);x.spread=.351;assert.equal(a.assessProfitFinder(x,finderLiquid).eligible,false);
+ x.qv=NaN;x.spread=.1;assert.equal(a.assessProfitFinder(x,finderLiquid).eligible,false);
+});
+test('Finder requires volume, real positive flow and multiple reversal confirmations for ready labels',()=>{
+ const a=app();for(const mutate of [x=>{x.vRatio=.99},x=>{x.flow.status='VERİ YOK'},x=>{x.flow.m15.net=-1},x=>{x.p.recovery.confirmations=6},x=>{x.p.recovery.base=false;x.p.recovery.higherLow=false;x.p.recovery.reclaim=false}]){
+ const x=profitFixture();x.p.bounce=false;mutate(x);const q=a.assessProfitFinder(x,finderLiquid);assert.equal(q.eligible,false);assert.notEqual(q.state.key,'CONDITIONAL');assert.notEqual(q.state.key,'CONFIRMED');
+ }
+ const x=profitFixture();x.p.recovery.recentAdvancePct=15;const q=a.assessProfitFinder(x,finderLiquid);assert.equal(q.eligible,false);assert.equal(q.state.key,'PULLBACK');
+});
+test('Finder optional historical capacity is bounded, complete-only and never overrides safety',()=>{
+ const a=app(),x=profitFixture();const before=a.assessProfitFinder(x,finderLiquid);x.opportunity24={complete:true,count3:3,max:15};const q=a.assessProfitFinder(x,finderLiquid);assert.equal(q.components.capacity,5);assert.ok(q.score<=before.score+5+1e-9);
+ x.opportunity24.complete=false;assert.equal(a.assessProfitFinder(x,finderLiquid).components.capacity,0);
+ x.opportunity24.complete=true;x.spread=1;assert.equal(a.assessProfitFinder(x,finderLiquid).eligible,false);
+});
+test('Finder scans beyond 32 without extra analysis and caches assessment for selection',async()=>{
+ const a=app();a.setTimeout=callback=>{queueMicrotask(callback);return 1};a.candidates=Array.from({length:40},(_,i)=>{const x=profitFixture();x.name='C'+i;x.qv=20000000-i;if(i<37){x.p.interimTarget=101;x.p.resistances=[101,115]}return x;});a.calls=0;
+ run(a,"purgeGhostPairs=async()=>{};all24hTickers=async()=>candidates.map(x=>({symbol:x.name+'TRY',quoteVolume:x.qv}));allBookTickers=async()=>[];candidateMetrics=async n=>{calls++;return candidates.find(x=>x.name===n)};scanHistory24=async()=>{}");
+ const winners=await a.findDaily3();assert.equal(a.calls,40);assert.equal(winners.length,3);assert.deepEqual(Array.from(winners,x=>x.name).sort(),['C37','C38','C39']);assert.ok(winners.every(x=>x.candidate===x.finder.score&&x.scanState===x.finder.state));
 });
